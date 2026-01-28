@@ -85,7 +85,7 @@ const AnalyticsDashboard = ({ courses }) => {
                                 <ResponsiveContainer width="100%" height="100%">
                                     {data.timeDistribution ? (
                                         <BarChart data={Object.entries(data.timeDistribution).map(([range, count]) => ({ range, count }))}>
-                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#374151" />
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1F2937" />
                                             <XAxis dataKey="range" stroke="#9CA3AF" />
                                             <YAxis stroke="#9CA3AF" />
                                             <Tooltip cursor={{ fill: '#374151' }} contentStyle={{ backgroundColor: '#1F2937', borderColor: '#374151', color: '#fff' }} />
