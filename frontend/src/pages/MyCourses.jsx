@@ -53,9 +53,9 @@ const MyCourses = () => {
     const aiProgress = getAIProgress();
 
     return (
-        <div className="min-h-screen bg-gray-900 text-white font-sans">
-            <div className="max-w-7xl mx-auto">
-                <header className="sticky top-0 z-50 bg-gray-900/95 backdrop-blur-md border-b border-gray-800 p-8 mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all">
+        <div className="flex flex-col h-full w-full overflow-hidden bg-gray-900 text-white font-sans">
+            <div className="max-w-7xl mx-auto w-full flex flex-col h-full">
+                <header className="sticky top-0 z-50 bg-gray-900/95 backdrop-blur-md border-b border-gray-800 p-8 mb-0 flex-shrink-0 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all">
                     <div>
                         <h1 className="text-3xl font-black mb-1">My Learning</h1>
                         <p className="text-gray-400">Manage your personalized path and enrolled classes.</p>
@@ -77,7 +77,7 @@ const MyCourses = () => {
                     </div>
                 </header>
 
-                <div className="px-8 pb-8">
+                <div className="flex-1 overflow-y-auto px-8 pb-8 scrollbar-thin scrollbar-thumb-gray-700">
                     {activeTab === 'ai-path' && (
                         <motion.div
                             initial={{ opacity: 0, x: 20 }}

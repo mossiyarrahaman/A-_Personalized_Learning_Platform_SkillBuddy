@@ -19,8 +19,14 @@ const Register = () => {
         setLoading(true);
         try {
             await register(formData.name, formData.email, formData.password, formData.role);
-            // Ideally navigate to a verification pending page or auto-login flow if implemented
-            navigate('/login');
+            // Navigate to login with state to trigger OTP view immediately
+            navigate('/login', {
+                state: {
+                    email: formData.email,
+                    requiresOtp: true,
+                    message: 'Registration successful! Please check your email for the verification code.'
+                }
+            });
         } catch (err) {
             if (err.response?.data?.error === 'Email already registered') {
                 setError('Email already registered. Redirecting to login...');

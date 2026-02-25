@@ -90,9 +90,9 @@ const CourseView = () => {
     if (!topic) return <div className="text-white text-center mt-20">Topic not found</div>;
 
     return (
-        <div className="min-h-screen bg-gray-900 text-gray-100 font-sans">
+        <div className="flex flex-col h-full w-full overflow-hidden bg-gray-900 text-gray-100 font-sans">
             {/* Header */}
-            <div className="bg-gray-900/90 backdrop-blur-md border-b border-gray-800 p-6 flex items-center justify-between sticky top-0 z-50">
+            <div className="bg-gray-900/90 backdrop-blur-md border-b border-gray-800 p-6 flex items-center justify-between shrink-0 z-50">
                 <div className="flex items-center space-x-4">
                     <button onClick={() => navigate('/dashboard')} className="p-2 hover:bg-gray-800 rounded-lg transition">
                         <ChevronLeft className="w-6 h-6" />
@@ -110,7 +110,7 @@ const CourseView = () => {
                 </div>
             </div>
 
-            <div className={`flex-1 p-8 max-w-5xl mx-auto w-full transition ${quizOpen ? 'blur-sm pointer-events-none' : ''}`}>
+            <div className={`flex-1 overflow-y-auto p-8 scrollbar-thin scrollbar-thumb-gray-700 max-w-5xl mx-auto w-full transition ${quizOpen ? 'blur-sm pointer-events-none' : ''}`}>
 
                 {/* AI Detailed Guide */}
                 {topic.content && (

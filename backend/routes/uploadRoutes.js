@@ -7,10 +7,11 @@ const fs = require('fs');
 // Configure storage
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
-        const uploadDir = 'uploads/';
+        // Use absolute path to ensure reliability
+        const uploadDir = path.join(__dirname, '../uploads');
         // Ensure directory exists
         if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir);
+            fs.mkdirSync(uploadDir, { recursive: true });
         }
         cb(null, uploadDir);
     },
@@ -23,18 +24,8 @@ const storage = multer.diskStorage({
 
 // File filter (optional, allow docs, video, audio, images)
 const fileFilter = (req, file, cb) => {
-    // Accept images, videos, audio, pdfs, docs
-    if (file.mimetype.startsWith('image/') ||
-        file.mimetype.startsWith('video/') ||
-        file.mimetype.startsWith('audio/') ||
-        file.mimetype === 'application/pdf' ||
-        file.mimetype.includes('wordprocessing') ||
-        file.mimetype.includes('spreadsheet') ||
-        file.mimetype.includes('presentation')) {
-        cb(null, true);
-    } else {
-        cb(new Error('Unsupported file type'), false);
-    }
+    // Allow all file types
+    cb(null, true);
 };
 
 const upload = multer({
@@ -46,26 +37,38 @@ const upload = multer({
 });
 
 // Upload route
-router.post('/', upload.single('file'), (req, res) => {
-    try {
-        if (!req.file) {
-            return res.status(400).json({ error: 'No file uploaded' });
+router.post('/', (req, res) => {
+    upload.single('file')(req, res, function (err) {
+        if (err instanceof multer.MulterError) {
+            // A Multer error occurred when uploading.
+            return res.status(400).json({ error: 'Upload Error: ' + err.message });
+        } else if (err) {
+            // An unknown error occurred when uploading.
+            return res.status(400).json({ error: 'Upload Error: ' + err.message });
         }
 
-        // Return the URL to access the file
-        // Assuming server serves 'uploads' at /uploads
-        const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+        // Everything went fine.
+        try {
+            if (!req.file) {
+                return res.status(400).json({ error: 'No file uploaded (req.file is missing)' });
+            }
 
-        res.json({
-            message: 'File uploaded successfully',
-            url: fileUrl,
-            type: req.file.mimetype,
-            filename: req.file.filename
-        });
-    } catch (error) {
-        console.error('Upload error:', error);
-        res.status(500).json({ error: 'Server error during upload' });
-    }
+            const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+
+            res.json({
+                message: 'File uploaded successfully',
+                url: fileUrl,
+                type: req.file.mimetype,
+                filename: req.file.filename
+            });
+        } catch (error) {
+            console.error('Upload processing error:', error);
+            res.status(500).json({
+                error: 'Server error: ' + error.message,
+                stack: error.stack
+            });
+        }
+    });
 });
 
 module.exports = router;

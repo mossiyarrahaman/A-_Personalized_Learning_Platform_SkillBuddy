@@ -13,6 +13,8 @@ import Leaderboard from './pages/Leaderboard';
 import MyCourses from './pages/MyCourses';
 import ClassView from './pages/ClassView';
 import AIPathCurriculum from './pages/AIPathCurriculum';
+import DashboardLayout from './layouts/DashboardLayout';
+import StudentAnalytics from './pages/StudentAnalytics';
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
@@ -31,39 +33,23 @@ function App() {
           <Route path="/register" element={<Register />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
 
-          <Route path="/dashboard" element={
-            <ProtectedRoute><Dashboard /></ProtectedRoute>
-          } />
+
           <Route path="/onboarding" element={
             <ProtectedRoute><Onboarding /></ProtectedRoute>
           } />
-          <Route path="/course/:moduleId/topic/:topicId" element={
-            <ProtectedRoute><CourseView /></ProtectedRoute>
-          } />
-          <Route path="/doubts" element={
-            <ProtectedRoute><Doubts /></ProtectedRoute>
-          } />
-          <Route path="/leaderboard" element={
-            <ProtectedRoute><Leaderboard /></ProtectedRoute>
-          } />
 
-          {/* New Routes for Separated Flow */}
-          <Route path="/my-courses" element={
-            <ProtectedRoute><MyCourses /></ProtectedRoute>
-          } />
-          <Route path="/class/:courseId" element={
-            <ProtectedRoute><ClassView /></ProtectedRoute>
-          } />
-
-          {/* Detailed Curriculum View for AI Path */}
-          <Route path="/ai-path" element={
-            <ProtectedRoute><AIPathCurriculum /></ProtectedRoute>
-          } />
-
-          {/* AI Path Viewer (alias to CourseView) */}
-          <Route path="/ai-course/module/:moduleId/topic/:topicId" element={
-            <ProtectedRoute><CourseView /></ProtectedRoute>
-          } />
+          {/* Main App with Sidebar Layout */}
+          <Route element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/course/:moduleId/topic/:topicId" element={<CourseView />} />
+            <Route path="/doubts" element={<Doubts />} />
+            <Route path="/analytics" element={<StudentAnalytics />} />
+            <Route path="/leaderboard" element={<Leaderboard />} />
+            <Route path="/my-courses" element={<MyCourses />} />
+            <Route path="/class/:courseId" element={<ClassView />} />
+            <Route path="/ai-path" element={<AIPathCurriculum />} />
+            <Route path="/ai-course/module/:moduleId/topic/:topicId" element={<CourseView />} />
+          </Route>
         </Routes>
       </Router>
     </AuthProvider>

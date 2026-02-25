@@ -243,8 +243,8 @@ const Onboarding = () => {
                     whileTap={{ scale: 0.98 }}
                     onClick={() => setData({ ...data, level: level.id })}
                     className={`relative p-8 rounded-2xl border-2 flex flex-col items-center gap-4 transition-all duration-300 overflow-hidden ${data.level === level.id
-                            ? 'border-purple-500 bg-purple-500/10 text-white shadow-xl shadow-purple-900/20'
-                            : 'border-gray-800 bg-gray-900/50 text-gray-400 hover:border-gray-600 hover:bg-gray-800'
+                        ? 'border-purple-500 bg-purple-500/10 text-white shadow-xl shadow-purple-900/20'
+                        : 'border-gray-800 bg-gray-900/50 text-gray-400 hover:border-gray-600 hover:bg-gray-800'
                         }`}
                 >
                     <div className="p-4 rounded-full bg-gray-800 mb-2">
@@ -274,8 +274,8 @@ const Onboarding = () => {
                     whileTap={{ scale: 0.98 }}
                     onClick={() => toggleGoal(goal.id)}
                     className={`p-6 rounded-xl border flex items-center gap-4 text-left transition-all duration-200 ${data.goals.includes(goal.id)
-                            ? 'border-blue-500 bg-blue-500/10 text-white shadow-lg shadow-blue-900/20'
-                            : 'border-gray-800 bg-gray-900/50 text-gray-400 hover:border-gray-600 hover:bg-gray-800'
+                        ? 'border-blue-500 bg-blue-500/10 text-white shadow-lg shadow-blue-900/20'
+                        : 'border-gray-800 bg-gray-900/50 text-gray-400 hover:border-gray-600 hover:bg-gray-800'
                         }`}
                 >
                     <div className={`p-3 rounded-lg ${data.goals.includes(goal.id) ? 'bg-blue-500 text-white' : 'bg-gray-800 text-gray-500'}`}>
@@ -339,8 +339,8 @@ const Onboarding = () => {
                                     key={optIdx}
                                     onClick={() => setQuizAnswers({ ...quizAnswers, [index]: optIdx })}
                                     className={`p-4 rounded-xl text-left transition-all font-medium ${quizAnswers[index] === optIdx
-                                            ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/30 ring-1 ring-blue-400'
-                                            : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                                        ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/30 ring-1 ring-blue-400'
+                                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
                                         }`}
                                 >
                                     {option}
@@ -497,15 +497,15 @@ const Onboarding = () => {
                             </button>
 
                             <button
-                                onClick={nextStep}
+                                onClick={step === 4 ? handleQuizSubmit : nextStep}
                                 disabled={
                                     (step === 2 && !data.level) ||
                                     (step === 3 && data.goals.length === 0) ||
                                     (step === 4 && Object.keys(quizAnswers).length < quizQuestions.length)
                                 }
                                 className={`px-8 py-3 rounded-xl font-bold flex items-center shadow-lg transition-all ${(step === 4)
-                                        ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-purple-900/50 hover:scale-105'
-                                        : 'bg-white text-black hover:scale-105'
+                                    ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-purple-900/50 hover:scale-105'
+                                    : 'bg-white text-black hover:scale-105'
                                     } disabled:opacity-30 disabled:hover:scale-100 disabled:cursor-not-allowed`}
                             >
                                 {step === 4 ? (

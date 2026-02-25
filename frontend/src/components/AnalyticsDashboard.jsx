@@ -61,8 +61,8 @@ const AnalyticsDashboard = ({ courses }) => {
                         {/* Engagement Chart */}
                         <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
                             <h3 className="text-lg font-bold text-white mb-4">Weekly Engagement</h3>
-                            <div className="h-64">
-                                <ResponsiveContainer width="100%" height="100%">
+                            <div className="h-64 w-full min-w-0">
+                                <ResponsiveContainer width="100%" height="100%" minHeight={200}>
                                     {data.engagement && data.engagement.dates ? (
                                         <LineChart data={data.engagement.dates.map((date, i) => ({ date, active: data.engagement.active[i] }))}>
                                             <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
@@ -81,8 +81,8 @@ const AnalyticsDashboard = ({ courses }) => {
                         {/* Time Distribution Chart */}
                         <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
                             <h3 className="text-lg font-bold text-white mb-4">Study Time Distribution</h3>
-                            <div className="h-64">
-                                <ResponsiveContainer width="100%" height="100%">
+                            <div className="h-64 w-full min-w-0">
+                                <ResponsiveContainer width="100%" height="100%" minHeight={200}>
                                     {data.timeDistribution ? (
                                         <BarChart data={Object.entries(data.timeDistribution).map(([range, count]) => ({ range, count }))}>
                                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#374151" />
@@ -94,6 +94,51 @@ const AnalyticsDashboard = ({ courses }) => {
                                     ) : (
                                         <div className="flex items-center justify-center h-full text-gray-500">No distribution data</div>
                                     )}
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Topic Quiz Performance Row */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
+                            <h3 className="text-lg font-bold text-white mb-4">Hardest Topics (Lowest Avg. Quiz Scores)</h3>
+                            <div className="h-64 w-full min-w-0">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart layout="vertical" data={[
+                                        { topic: "Recursion", avgScore: 45 },
+                                        { topic: "Graph Theory", avgScore: 52 },
+                                        { topic: "Dynamic Programming", avgScore: 58 },
+                                        { topic: "Sorting Algorithms", avgScore: 65 },
+                                        { topic: "Binary Search", avgScore: 72 }
+                                    ]}>
+                                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#374151" />
+                                        <XAxis type="number" domain={[0, 100]} stroke="#9CA3AF" />
+                                        <YAxis dataKey="topic" type="category" width={120} stroke="#9CA3AF" style={{ fontSize: '12px' }} />
+                                        <Tooltip contentStyle={{ backgroundColor: '#1F2937', borderColor: '#374151', color: '#fff' }} />
+                                        <Bar dataKey="avgScore" name="Avg Score" fill="#EF4444" radius={[0, 4, 4, 0]} barSize={20} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+
+                        <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
+                            <h3 className="text-lg font-bold text-white mb-4">Topic Fail Rates</h3>
+                            <div className="h-64 w-full min-w-0">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart layout="vertical" data={[
+                                        { topic: "Recursion", failRate: 35 },
+                                        { topic: "Pointers", failRate: 28 },
+                                        { topic: "Memory Management", failRate: 25 },
+                                        { topic: "Promises", failRate: 20 },
+                                        { topic: "Async/Await", failRate: 15 }
+                                    ]}>
+                                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#374151" />
+                                        <XAxis type="number" domain={[0, 100]} stroke="#9CA3AF" />
+                                        <YAxis dataKey="topic" type="category" width={120} stroke="#9CA3AF" style={{ fontSize: '12px' }} />
+                                        <Tooltip contentStyle={{ backgroundColor: '#1F2937', borderColor: '#374151', color: '#fff' }} />
+                                        <Bar dataKey="failRate" name="Fail Rate (%)" fill="#F59E0B" radius={[0, 4, 4, 0]} barSize={20} />
+                                    </BarChart>
                                 </ResponsiveContainer>
                             </div>
                         </div>

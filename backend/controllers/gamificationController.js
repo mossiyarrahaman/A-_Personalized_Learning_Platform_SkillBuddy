@@ -2,19 +2,26 @@ const StudentProfile = require('../models/StudentProfile');
 
 exports.getLeaderboard = async (req, res) => {
     try {
+        console.log("Fetching Leaderboard...");
         const topStudents = await StudentProfile.find()
             .sort({ points: -1 })
             .limit(10)
-            .populate('userId', 'name email'); // Assuming User model has name
+            .populate('userId', 'name email');
 
-        const leaderboard = topStudents.map((s, index) => ({
-            rank: index + 1,
-            name: s.userId ? s.userId.name : 'Unknown',
-            points: s.points,
-            badges: s.badges.length,
-            streak: s.streak,
-            isCurrentUser: s.userId && s.userId._id.toString() === req.user.id
-        }));
+        console.log(`Found ${topStudents.length} profiles for leaderboard.`);
+
+        const leaderboard = topStudents.map((s, index) => {
+            // Filter out if user is null (deleted user)
+            if (!s.userId) return null;
+            return {
+                rank: index + 1,
+                name: s.userId.name,
+                points: s.points || 0,
+                badges: s.badges ? s.badges.length : 0,
+                streak: s.streak || 0,
+                isCurrentUser: req.user && s.userId._id.toString() === req.user.id
+            };
+        }).filter(item => item !== null); // Remove null entries
 
         res.json({ leaderboard });
     } catch (error) {
@@ -32,7 +39,8 @@ exports.getUserStats = async (req, res) => {
             points: profile.points,
             badges: profile.badges,
             streak: profile.streak,
-            level: profile.level
+            level: profile.level,
+            hoursStudied: profile.stats?.hoursStudied || 0 // Added this line
         });
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch stats' });

@@ -214,19 +214,42 @@ exports.updateResourceProgress = async (req, res) => {
         const userId = req.user.id;
 
         // 1. Update StudentProfile (Legacy/Fallback for path generation)
-        const profile = await StudentProfile.findOne({ userId });
+        let profile = await StudentProfile.findOne({ userId });
+        if (!profile) {
+            console.log("Profile not found, creating new one for user:", userId);
+            profile = new StudentProfile({ userId, points: 0, stats: { hoursStudied: 0, coursesCompleted: 0, quizzesTaken: 0, avgScore: 0 } });
+            await profile.save();
+        }
+
         if (profile) {
             const moduleDoc = profile.currentPath?.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
             if (moduleDoc) {
                 const topicDoc = moduleDoc.topics.find(t => t.id === topicId || t._id.toString() === topicId);
                 if (topicDoc) {
                     const resource = topicDoc.resources.find(r => r._id.toString() === resourceId || r.id === resourceId);
-                    if (resource) {
-                        resource.completed = progress === 100;
+                    const wasCompleted = resource.completed;
+                    if (progress === 100) {
+                        resource.completed = true;
                     }
+
+                    // --- GAMIFICATION & STATS ---
+                    // 1. Update Study Time (hours)
+                    if (timeSpent && timeSpent > 0) {
+                        if (!profile.stats.hoursStudied) profile.stats.hoursStudied = 0;
+                        profile.stats.hoursStudied += (timeSpent / 3600);
+                    }
+
+                    // 2. Award Points for Resource Completion (if new completion)
+                    if (!wasCompleted && resource.completed) {
+                        if (!profile.points) profile.points = 0;
+                        profile.points += 10; // 10 XP per resource
+                        profile.lastActiveDate = Date.now();
+                    }
+
                     // Check topic completion
                     if (topicDoc.resources.every(r => r.completed)) {
                         topicDoc.status = 'completed';
+                        // Optional: Bonus for topic completion?
                     }
                 }
             }
@@ -343,7 +366,7 @@ exports.updateCourseModules = async (req, res) => {
         res.json({ message: 'Curriculum updated successfully', modules: course.modules });
     } catch (error) {
         console.error("Error updating curriculum:", error);
-        res.status(500).json({ error: 'Server error updating curriculum' });
+        res.status(500).json({ error: 'Server error: ' + error.message, details: error.errors });
     }
 };
 
@@ -446,79 +469,134 @@ exports.getCourseAnalytics = async (req, res) => {
         const avgMinutes = Math.floor((avgSeconds % 3600) / 60);
         const avgTimeSpent = `${avgHours}h ${avgMinutes}m`;
 
-        // Engagement Data (Last 7 days activity)
-        // Simple mock for graph visual
-        const engagement = {
-            dates: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-            active: [0, 0, 0, 0, 0, 0, activeStudents]
-        };
+        // Topic Quiz Analytics Logic
+        const topicStats = {}; // { topicId: { title, totalScore, attempts, fails } }
+
+        progressRecords.forEach(p => {
+            if (p.topicQuizScores && p.topicQuizScores.length > 0) {
+                p.topicQuizScores.forEach(quiz => {
+                    if (!topicStats[quiz.topicId]) {
+                        topicStats[quiz.topicId] = {
+                            title: quiz.topicTitle || "Unknown Topic",
+                            totalScore: 0,
+                            attempts: 0,
+                            fails: 0
+                        };
+                    }
+                    // Consider only the higest score or average? Let's take the latest stored.
+                    // Actually p.topicQuizScores stores history. 
+                    // Let's use the average of all attempts or best? 
+                    // Usually analytics wants "how are students performing". 
+                    // Let's use the score of this record entry.
+                    topicStats[quiz.topicId].totalScore += quiz.score;
+                    topicStats[quiz.topicId].attempts += 1;
+                    if (!quiz.passed) topicStats[quiz.topicId].fails += 1;
+                    if (quiz.topicTitle && topicStats[quiz.topicId].title === "Unknown Topic") {
+                        topicStats[quiz.topicId].title = quiz.topicTitle;
+                    }
+                });
+            }
+        });
+
+        const topicPerformance = Object.values(topicStats).map(t => ({
+            topic: t.title,
+            avgScore: Math.round(t.totalScore / t.attempts),
+            failRate: Math.round((t.fails / t.attempts) * 100),
+            attempts: t.attempts
+        })).sort((a, b) => a.avgScore - b.avgScore); // Ascending score (hardest first)
+
+        const hardestTopics = topicPerformance.slice(0, 5);
 
         res.json({
             stats: {
                 totalStudents,
                 activeStudents,
                 avgProgress,
-                avgTimeSpent // Replaces avgScore
+                avgTimeSpent
             },
-            students: studentsProgressData, // Sending list of students with progress
-            timeDistribution, // Replaces scoreDistribution
-            engagement
+            engagement: {
+                dates: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+                active: [activeStudents, activeStudents, activeStudents, activeStudents, activeStudents, activeStudents, activeStudents] // Mock for now
+                // Real implementation requires history logs which we don't have yet
+            },
+            timeDistribution,
+            topicPerformance,
+            hardestTopics,
+            students: studentsProgressData
         });
-
     } catch (error) {
-        console.error("Error fetching analytics:", error);
+        console.error("Error fetching course analytics:", error);
         res.status(500).json({ error: 'Server error fetching analytics' });
     }
 };
 
+
 // --- NEW: Enrollment & Progress Logic for Teacher Classes ---
 
-// Enroll a student in a class (Teacher adds student)
+// Enroll a student or multiple students in a class
 exports.enrollStudent = async (req, res) => {
     try {
         const { courseId } = req.params;
-        const { identifier } = req.body;
+        const { identifier, identifiers } = req.body; // Support both single and bulk
         const teacherId = req.user.id;
 
         const course = await Course.findById(courseId);
         if (!course) return res.status(404).json({ error: 'Course not found' });
 
-        // Ensure only the author (teacher) can add students
         if (course.author.toString() !== teacherId) {
             return res.status(403).json({ error: 'Not authorized to add students to this course' });
         }
 
-        // Find student by Email OR Name
-        let student = await User.findOne({ email: identifier });
-        if (!student) {
-            student = await User.findOne({ name: identifier, role: 'student' });
+        // Normalize input to array
+        const targets = identifiers || [identifier];
+        const results = { added: [], failed: [], alreadyEnrolled: [] };
+
+        for (const target of targets) {
+            if (!target) continue;
+
+            // Find student
+            let student = await User.findOne({ email: target });
+            if (!student) {
+                student = await User.findOne({ name: target, role: 'student' });
+            }
+
+            if (!student) {
+                results.failed.push(target);
+                continue;
+            }
+
+            const studentIdStr = student._id.toString();
+            const enrolledStrs = course.enrolledStudents.map(id => id.toString());
+
+            if (enrolledStrs.includes(studentIdStr)) {
+                results.alreadyEnrolled.push(student.name);
+                continue;
+            }
+
+            // Add to Course
+            course.enrolledStudents.push(student._id);
+
+            // Create Progress Record
+            const progress = new Progress({
+                student: student._id,
+                course: course._id,
+                completedTopics: [],
+                completedResources: []
+            });
+            await progress.save();
+
+            results.added.push(student.name);
         }
 
-        if (!student) return res.status(404).json({ error: 'Student not found with that Email or Name' });
-
-        // Check if already enrolled
-        // Convert to string for comparison to be safe
-        const studentIdStr = student._id.toString();
-        const enrolledStrs = course.enrolledStudents.map(id => id.toString());
-
-        if (enrolledStrs.includes(studentIdStr)) {
-            return res.status(400).json({ error: 'Student already enrolled' });
+        if (results.added.length > 0) {
+            await course.save();
         }
 
-        // Add to Course
-        course.enrolledStudents.push(student._id);
-        await course.save();
-
-        // Create Progress Record
-        const progress = new Progress({
-            student: student._id,
-            course: course._id,
-            completedTopics: [],
-            completedResources: []
+        res.json({
+            message: `Processed ${targets.length} requests. Added: ${results.added.length}.`,
+            results
         });
-        await progress.save();
 
-        res.json({ message: 'Student enrolled successfully', student: { id: student._id, name: student.name, email: student.email } });
     } catch (error) {
         console.error("Enrollment error:", error);
         res.status(500).json({ error: 'Server error enrolling student' });
@@ -632,5 +710,179 @@ exports.getTopicAnalytics = async (req, res) => {
     } catch (error) {
         console.error("Error fetching topic analytics:", error);
         res.status(500).json({ error: 'Server error' });
+    }
+};
+
+exports.generateResourceQuiz = async (req, res) => {
+    try {
+        const { resourceTitle, topicTitle } = req.body;
+        console.log(`Generating quiz for resource: ${resourceTitle} (${topicTitle})`);
+
+        const questions = await aiService.generateQuizFromContext(
+            topicTitle || "General",
+            `Resource Title: ${resourceTitle}`,
+            5
+        );
+
+        res.json({ questions });
+    } catch (error) {
+        console.error("Error generating resource quiz:", error);
+        res.status(500).json({ error: 'Failed to generate quiz' });
+    }
+};
+
+// --- NEW TOPIC QUIZ LOGIC ---
+
+// 1. Get or Generate Topic Quiz
+exports.adminTopicQuiz = async (req, res) => {
+    try {
+        const { courseId, moduleId, topicId } = req.params;
+        const { bloomLevel } = req.query; // Passed from frontend when generating
+        const userId = req.user.id; // Student ID
+
+        const course = await Course.findById(courseId);
+        if (!course) return res.status(404).json({ error: 'Course not found' });
+
+        const moduleDoc = course.modules.id(moduleId);
+        if (!moduleDoc) return res.status(404).json({ error: 'Module not found' });
+
+        const topicDoc = moduleDoc.topics.id(topicId);
+        if (!topicDoc) return res.status(404).json({ error: 'Topic not found' });
+
+        // Check if quiz already exists for this topic/bloom combo
+        // For simplicity, we can just generate a new one or retrieve last one
+        // We'll generate fresh if requested, or cache it. Given the requirement "Generate AI-based quizzes", let's generate on demand but maybe save to TopicQuiz model for logging.
+
+        // Actually, Step 2 says "Generate ONLY topic name...".
+        console.log(`Generating Topic Quiz: ${topicDoc.title} (${course.title}) [${bloomLevel}]`);
+
+        const questions = await aiService.generateTopicQuiz(
+            topicDoc.title,
+            course.title,
+            course.level || 'Intermediate',
+            bloomLevel || 'understand',
+            topicDoc.description || ''
+        );
+
+        // Optional: Save to TopicQuiz model if we want to build a bank
+        // const newQuiz = new TopicQuiz({ ... }) 
+
+        res.json({ title: topicDoc.title, questions });
+
+    } catch (error) {
+        console.error("Error generating topic quiz:", error);
+        res.status(500).json({ error: 'Server error generating quiz' });
+    }
+};
+
+// 2. Submit Quiz & Update Progress
+exports.submitTopicQuiz = async (req, res) => {
+    try {
+        const { courseId, moduleId, topicId } = req.params;
+        // score is percentage (0-100), details is array of question results
+        const { score, totalQuestions, correctAnswers } = req.body;
+        const userId = req.user.id;
+
+        const passed = score >= 70;
+
+        // Update Progress
+        let progress = await Progress.findOne({ student: userId, course: courseId });
+        if (!progress) {
+            progress = new Progress({ student: userId, course: courseId });
+        }
+
+        // Add to topicQuizScores
+        // Remove previous attempt for this topic if exists to keep array clean (or keep history)
+        // Let's keep history
+        progress.topicQuizScores.push({
+            topicId,
+            topicTitle: "Unknown", // Ideally fetch from course, but optimizing DB calls
+            score,
+            totalQuestions,
+            correctAnswers,
+            passed,
+            attempts: 1, // Logic to increment if exists could be added
+            lastAttemptDate: Date.now()
+        });
+
+        // Check Topic Completion Rule
+        // Topic = COMPLETED only if: All mandatory resources completed AND Quiz Score >= 70%
+
+        // We need to check resources status
+        const course = await Course.findById(courseId);
+        const moduleDoc = course.modules.id(moduleId);
+        const topicDoc = moduleDoc.topics.id(topicId);
+
+        if (topicDoc) {
+            // Check if resources are done
+            // We need to look at progress.resourceProgress for this topic's resources
+            const resourceIds = topicDoc.resources.map(r => r._id.toString());
+
+            // Check if all resourceIds exist in progress.resourceProgress with completed: true
+            // Note: User constraint says "Student completes all mandatory resources". Assuming all are mandatory for now.
+
+            const completedResourcesCount = progress.resourceProgress.filter(rp =>
+                resourceIds.includes(rp.resourceId) && rp.completed
+            ).length;
+
+            const allResourcesDone = completedResourcesCount >= resourceIds.length;
+
+            if (passed && allResourcesDone) {
+                if (!progress.completedTopics.includes(topicId)) {
+                    progress.completedTopics.push(topicId);
+                }
+                // Check Module Completion
+                // if (moduleDoc.topics.every(...) ) ... (Leaving for future optimization)
+            }
+        }
+
+        await progress.save();
+
+        // --- GAMIFICATION UPDATE ---
+        if (passed) {
+            try {
+                let profile = await StudentProfile.findOne({ userId });
+                if (!profile) {
+                    profile = new StudentProfile({ userId, points: 0, stats: { hoursStudied: 0, coursesCompleted: 0, quizzesTaken: 0, avgScore: 0 } });
+                }
+
+                if (profile) {
+                    profile.points = (profile.points || 0) + 50; // Award 50 points for passing quiz
+                    profile.stats.quizzesTaken += 1;
+
+                    // Update avg score (simple running average)
+                    const currentAvg = profile.stats.avgScore || 0;
+                    const totalQuizzes = profile.stats.quizzesTaken;
+                    profile.stats.avgScore = Math.round(((currentAvg * (totalQuizzes - 1)) + score) / totalQuizzes);
+
+                    // Check for badges (Simple example)
+                    if (profile.stats.quizzesTaken === 1) {
+                        profile.badges.push({
+                            id: 'first_quiz',
+                            name: 'First Quiz Ace',
+                            icon: '🎯'
+                        });
+                    }
+                    if (score === 100) {
+                        profile.badges.push({
+                            id: 'perfect_score',
+                            name: 'Perfectionist',
+                            icon: '🌟'
+                        });
+                    }
+
+                    await profile.save();
+                }
+            } catch (statsError) {
+                console.error("Error updating gamification stats:", statsError);
+                // Don't fail the request if stats fail
+            }
+        }
+
+        res.json({ success: true, passed, topicCompleted: progress.completedTopics.includes(topicId) });
+
+    } catch (error) {
+        console.error("Error submitting quiz:", error);
+        res.status(500).json({ error: 'Server error processing quiz result' });
     }
 };

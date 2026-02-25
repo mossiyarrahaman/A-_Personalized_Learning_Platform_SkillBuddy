@@ -25,7 +25,7 @@ const QuizGenerationModal = ({ isOpen, onClose, courseId, moduleId, topicId, top
     const generateQuiz = async () => {
         setStep('loading');
         try {
-            const res = await api.post('/assessment/generate-from-context', {
+            const res = await api.post('/assessments/generate-from-context', {
                 courseId,
                 moduleId,
                 topicId,
@@ -122,8 +122,8 @@ const QuizGenerationModal = ({ isOpen, onClose, courseId, moduleId, topicId, top
                                             key={level.id}
                                             onClick={() => setBloomLevel(level.id)}
                                             className={`p-4 rounded-xl border text-left transition-all ${bloomLevel === level.id
-                                                    ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-900/20'
-                                                    : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-600 hover:bg-gray-750'
+                                                ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-900/20'
+                                                : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-600 hover:bg-gray-750'
                                                 }`}
                                         >
                                             <div className="font-bold mb-1">{level.label}</div>

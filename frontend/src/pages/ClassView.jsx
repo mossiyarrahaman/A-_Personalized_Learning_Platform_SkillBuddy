@@ -7,6 +7,7 @@ import api from '../api/axios';
 import ResourcePlayer from '../components/ResourcePlayer';
 import QuizGenerationModal from '../components/QuizGenerationModal';
 
+
 const ClassView = () => {
     const { courseId } = useParams();
     const navigate = useNavigate();
@@ -74,9 +75,9 @@ const ClassView = () => {
     if (!course) return <div className="min-h-screen bg-gray-900 flex items-center justify-center text-white">Class not found</div>;
 
     return (
-        <div className="min-h-screen bg-gray-900 text-white font-sans">
+        <div className="flex flex-col h-full w-full overflow-hidden bg-gray-900 text-white font-sans">
             {/* Header */}
-            <header className="bg-gray-900/90 backdrop-blur-md border-b border-gray-800 p-6 sticky top-0 z-50 transition-all">
+            <header className="bg-gray-900/90 backdrop-blur-md border-b border-gray-800 p-6 sticky top-0 z-40 transition-all shrink-0">
                 <div className="max-w-5xl mx-auto flex items-center gap-4">
                     <button onClick={() => navigate('/my-courses')} className="p-2 hover:bg-gray-800 rounded-lg transition">
                         <ChevronLeft />
@@ -88,10 +89,10 @@ const ClassView = () => {
                 </div>
             </header>
 
-            <main className="max-w-5xl mx-auto p-6">
-                <div className="grid grid-cols-1 gap-6">
+            <main className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
+                <div className="max-w-5xl mx-auto grid grid-cols-1 gap-6 pb-20">
                     {course.modules.map((module, index) => (
-                        <div key={module._id || index} className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden">
+                        <div key={module._id || index} className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden shrink-0">
                             <button
                                 onClick={() => setExpandedModule(expandedModule === module._id ? null : module._id)}
                                 className="w-full p-6 text-left flex justify-between items-center hover:bg-gray-750 transition"

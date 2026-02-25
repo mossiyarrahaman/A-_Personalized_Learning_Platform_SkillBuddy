@@ -15,11 +15,15 @@ router.put('/:courseId/modules', auth, courseController.updateCourseModules);
 router.patch('/:courseId/modules/:moduleId/topics/:topicId/status', auth, courseController.updateTopicStatus);
 router.get('/:courseId/analytics', auth, courseController.getCourseAnalytics);
 router.get('/:courseId/module/:moduleId/topic/:topicId/analytics', auth, courseController.getTopicAnalytics);
+// Topic Quiz Routes
+router.get('/:courseId/module/:moduleId/topic/:topicId/quiz', auth, courseController.adminTopicQuiz);
+router.post('/:courseId/module/:moduleId/topic/:topicId/quiz/submit', auth, courseController.submitTopicQuiz);
 
 // Student Class Routes
 router.post('/:courseId/enroll', auth, courseController.enrollStudent); // Teacher enrolls student
 router.get('/student/enrolled-classes', auth, courseController.getEnrolledClasses); // Student gets their classes
 router.post('/class-progress', auth, courseController.updateClassProgress); // Update tracking for class
-
+router.post('/path/toggle-topic', auth, courseController.toggleTopicComplete);
+router.post('/generate-resource-quiz', auth, courseController.generateResourceQuiz); // Generate quiz from resource
 
 module.exports = router;

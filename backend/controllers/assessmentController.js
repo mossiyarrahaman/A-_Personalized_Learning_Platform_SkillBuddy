@@ -62,13 +62,18 @@ exports.generateContextQuiz = async (req, res) => {
         const topic = module.topics.find(t => t._id.toString() === topicId || t.id === topicId);
         if (!topic) return res.status(404).json({ error: 'Topic not found' });
 
-        // Extract resources
-        const resources = topic.resources || [];
+        // Call AI Service - Use the robust Topic Quiz generation
+        // Requirement: "just on the topic"
+        const questions = await aiService.generateTopicQuiz(
+            topic.title,
+            course.title,
+            course.level || 'Intermediate',
+            bloomLevel,
+            topic.description || '' // Minimal context
+        );
 
-        // Call AI Service
-        const quizData = await aiService.generateContextAwareQuiz(topic, resources, bloomLevel);
-
-        res.json(quizData);
+        // Format for frontend (QuizGenerationModal expects { quiz: { questions: ... } })
+        res.json({ quiz: { questions } });
 
     } catch (error) {
         console.error('Context Quiz Error:', error);

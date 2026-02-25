@@ -145,7 +145,7 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
 
         try {
             const response = await api.post('/upload', formData, {
-                headers: { 'Content-Type': 'multipart/form-data' }
+                headers: { 'Content-Type': null }
             });
 
             setSyllabus({
@@ -156,7 +156,8 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
             alert('Syllabus uploaded successfully!');
         } catch (error) {
             console.error(error);
-            alert('Syllabus upload failed.');
+            const msg = error.response?.data?.error || error.message || 'Syllabus upload failed';
+            alert('Syllabus upload failed: ' + msg);
         }
     };
 
@@ -168,16 +169,16 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
         formData.append('file', file);
 
         try {
-            // Optimistic UI update or loader could go here
+            // Force Content-Type to null to let browser set boundary
             const response = await api.post('/upload', formData, {
-                headers: { 'Content-Type': 'multipart/form-data' }
+                headers: { 'Content-Type': null }
             });
 
             const newModules = [...modules];
             const resource = newModules[mIndex].topics[tIndex].resources[rIndex];
 
             resource.url = response.data.url;
-            resource.title = resource.title || file.name; // Auto-fill title if empty
+            resource.title = resource.title || file.name;
 
             // Auto-detect type
             if (response.data.type?.startsWith('video')) resource.type = 'video';
@@ -188,7 +189,8 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
             alert('File uploaded successfully!');
         } catch (error) {
             console.error(error);
-            alert('Upload failed.');
+            const msg = error.response?.data?.error || error.message || 'Upload failed';
+            alert('Upload failed: ' + msg);
         }
     };
 
@@ -206,7 +208,8 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
             if (onSave) onSave();
         } catch (error) {
             console.error(error);
-            alert("Failed to save.");
+            const errorMsg = error.response?.data?.error || "Failed to save.";
+            alert(errorMsg);
         } finally {
             setSaving(false);
         }
@@ -419,6 +422,8 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
                                                         <option value="link">Link</option>
                                                         <option value="audio">Audio</option>
                                                         <option value="quiz">Quiz</option>
+                                                        <option value="documentation">Documentation</option>
+                                                        <option value="assignment">Assignment</option>
                                                     </select>
                                                     <input
                                                         type="text"
@@ -446,7 +451,7 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
                                                                 accept={
                                                                     res.type === 'video' ? 'video/*' :
                                                                         res.type === 'audio' ? 'audio/*' :
-                                                                            '.pdf,.doc,.docx,.txt,.xls,.xlsx,.ppt,.pptx'
+                                                                            '*' // Allow all files for documents/others
                                                                 }
                                                             />
                                                         </label>

@@ -36,7 +36,7 @@ const courseSchema = new mongoose.Schema({
             isChecked: { type: Boolean, default: false }, // Checkbox tracking
 
             resources: [{
-                type: { type: String, enum: ['video', 'article', 'book', 'documentation', 'audio', 'quiz', 'assignment'] },
+                type: { type: String, enum: ['video', 'article', 'book', 'documentation', 'audio', 'quiz', 'assignment', 'link'] },
                 title: String,
                 url: String, // Link to file/video/audio
                 content: String, // For text-based resources or instructions

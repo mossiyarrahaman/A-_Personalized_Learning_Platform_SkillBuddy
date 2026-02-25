@@ -1,20 +1,22 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { ChevronLeft, Mail, Lock, Eye, EyeOff, Brain, ArrowRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 
 const Login = () => {
     const navigate = useNavigate();
+    const location = useLocation();
     const { login, verifyOtp, resendOtp, user, logout } = useAuth(); // Added user, logout
 
-    const [email, setEmail] = useState('');
+    const [email, setEmail] = useState(location.state?.email || '');
     const [password, setPassword] = useState('');
     const [otp, setOtp] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
+    const [success, setSuccess] = useState(location.state?.message || '');
     const [loading, setLoading] = useState(false);
-    const [requiresOtp, setRequiresOtp] = useState(false);
+    const [requiresOtp, setRequiresOtp] = useState(location.state?.requiresOtp || false);
 
     // If user is already logged in, show the "Allow switch" UI
     if (user && !requiresOtp) {
@@ -71,6 +73,7 @@ const Login = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
+        setSuccess('');
         setLoading(true);
         try {
             if (requiresOtp) {
@@ -94,6 +97,19 @@ const Login = () => {
             } else {
                 setError('Login failed. Please check your credentials.');
             }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleResendOtp = async () => {
+        try {
+            setLoading(true); // fast feedback
+            await resendOtp(email);
+            setSuccess('Verification code resent to your email.');
+            setError('');
+        } catch (err) {
+            setError('Failed to resend OTP. Please try again.');
         } finally {
             setLoading(false);
         }
@@ -130,6 +146,14 @@ const Login = () => {
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-5">
+                    {success && (
+                        <motion.div
+                            initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
+                            className="bg-green-500/10 border border-green-500/20 text-green-400 px-4 py-3 rounded-xl text-sm font-medium"
+                        >
+                            {success}
+                        </motion.div>
+                    )}
                     {error && (
                         <motion.div
                             initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
@@ -193,6 +217,16 @@ const Login = () => {
                                 required
                                 placeholder="000000"
                             />
+                            <div className="text-right">
+                                <button
+                                    type="button"
+                                    onClick={handleResendOtp}
+                                    className="text-sm text-purple-400 hover:text-purple-300 font-semibold transition-colors"
+                                    disabled={loading}
+                                >
+                                    Resend Code
+                                </button>
+                            </div>
                         </div>
                     )}
 

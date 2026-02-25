@@ -12,6 +12,16 @@ const progressSchema = new mongoose.Schema({
         completed: { type: Boolean, default: false },
         lastPosition: { type: Number, default: 0 }
     }],
+    topicQuizScores: [{
+        topicId: String, // ID from the Course.modules.topics
+        topicTitle: String,
+        score: Number, // Percentage 0-100
+        totalQuestions: Number,
+        correctAnswers: Number,
+        passed: { type: Boolean, default: false }, // >= 70%
+        attempts: { type: Number, default: 0 },
+        lastAttemptDate: { type: Date, default: Date.now }
+    }],
     grade: { type: Number, default: 0 },
     lastAccessed: { type: Date, default: Date.now },
     enrollmentDate: { type: Date, default: Date.now },
