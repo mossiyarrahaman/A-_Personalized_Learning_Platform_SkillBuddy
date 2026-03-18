@@ -1,47 +1,62 @@
 // ============================================================================
-// SKILLBUDDY AI SERVICE - OpenRouter Integration
+// SKILLBUDDY AI SERVICE - OpenRouter Integration (FIXED v3)
 // backend/services/ai-service.js
 // ============================================================================
 
 const axios = require('axios');
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const AI_MODEL = process.env.AI_MODEL || 'pstage/solar-pro-3:free';
+const AI_MODEL = process.env.AI_MODEL || 'qwen/qwen-2.5-7b-instruct';
 const SITE_URL = process.env.SITE_URL || 'http://localhost:5173';
 const SITE_NAME = process.env.SITE_NAME || 'SkillBuddy';
 
 if (!OPENROUTER_API_KEY) {
-  console.warn('⚠️ OPENROUTER_API_KEY not found in .env file');
+  console.warn('⚠️  OPENROUTER_API_KEY not found in .env file');
 }
 
-// Helper function to clean AI responses
+// ============================================================================
+// cleanJSONResponse
+// ============================================================================
 function cleanJSONResponse(text) {
-  // Remove markdown code blocks
-  let cleaned = text.trim()
-    .replace(/```json\s*/gi, '')
-    .replace(/```\s*/g, '')
-    .trim();
+  if (!text) throw new Error('Empty response from AI');
 
-  // Try to find JSON array or object in the response
-  const arrayMatch = cleaned.match(/\[\s*\{[\s\S]*\}\s*\]/);
-  const objectMatch = cleaned.match(/\{\s*"[\s\S]*\}/);
+  let cleaned = text.trim();
+  cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  cleaned = cleaned.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
 
-  if (arrayMatch) {
-    cleaned = arrayMatch[0];
-  } else if (objectMatch) {
-    cleaned = objectMatch[0];
+  try { JSON.parse(cleaned); return cleaned; } catch (_) { }
+
+  const arrayStart = cleaned.indexOf('[');
+  if (arrayStart !== -1) {
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (lastBrace !== -1) {
+      const repaired = cleaned.substring(arrayStart, lastBrace + 1) + ']';
+      try {
+        JSON.parse(repaired);
+        console.warn('⚠️  JSON truncated — recovered', JSON.parse(repaired).length, 'items');
+        return repaired;
+      } catch (_) { }
+    }
   }
 
-  return cleaned;
+  const objStart = cleaned.indexOf('{');
+  const objEnd = cleaned.lastIndexOf('}');
+  if (objStart !== -1 && objEnd > objStart) {
+    const extracted = cleaned.substring(objStart, objEnd + 1);
+    try { JSON.parse(extracted); return extracted; } catch (_) { }
+  }
+
+  throw new Error(`Could not parse AI response. First 300 chars: ${cleaned.substring(0, 300)}`);
 }
 
-async function callOpenRouter(prompt, maxTokens = 3000) {
-  if (!OPENROUTER_API_KEY) {
-    throw new Error('OpenRouter API key not configured');
-  }
+// ============================================================================
+// callOpenRouter
+// ============================================================================
+async function callOpenRouter(prompt, maxTokens = 4000) {
+  if (!OPENROUTER_API_KEY) throw new Error('OpenRouter API key not configured.');
 
   try {
-    console.log('🤖 Calling OpenRouter AI...');
+    console.log(`🤖 Calling OpenRouter [model: ${AI_MODEL}, maxTokens: ${maxTokens}]`);
 
     const response = await axios.post(
       'https://openrouter.ai/api/v1/chat/completions',
@@ -50,282 +65,209 @@ async function callOpenRouter(prompt, maxTokens = 3000) {
         messages: [
           {
             role: 'system',
-            content: 'You are a helpful educational assistant. Always respond with valid JSON only, no markdown formatting or explanations.'
+            content: 'You are a helpful educational assistant. Always respond with valid JSON only. ' +
+              'Do NOT include markdown formatting, code fences, or any text outside the JSON. ' +
+              'Keep all string values concise.'
           },
-          {
-            role: 'user',
-            content: prompt
-          }
+          { role: 'user', content: prompt }
         ],
         max_tokens: maxTokens,
-        temperature: 0.7,
+        temperature: 0.7
       },
       {
         headers: {
-          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
           'HTTP-Referer': SITE_URL,
           'X-Title': SITE_NAME,
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
-        timeout: 45000 // Increased timeout for larger models
+        timeout: 90000
       }
     );
 
-    const content = response.data.choices[0]?.message?.content;
-    console.log('✅ OpenRouter response received, length:', content?.length);
-    return content;
-  } catch (error) {
-    console.error('❌ OpenRouter API Error:', error.message);
-    if (error.response) {
-      console.error('   Status:', error.response.status);
-      console.error('   Data:', JSON.stringify(error.response.data));
+    const choice = response.data.choices[0];
+    const content = choice?.message?.content;
+    if (!content) throw new Error('AI returned empty content');
+    if (choice.finish_reason === 'length') {
+      console.warn('⚠️  Response truncated (finish_reason: length). Recovery will be attempted.');
     }
+    console.log(`✅ OpenRouter OK [${content.length} chars, finish_reason: ${choice.finish_reason}]`);
+    return content;
+
+  } catch (error) {
+    if (error.response) {
+      const { status, data } = error.response;
+      console.error(`❌ OpenRouter HTTP ${status}:`, JSON.stringify(data, null, 2));
+      if (status === 401) throw new Error('Invalid OpenRouter API key');
+      if (status === 404) throw new Error(`Model not found: "${AI_MODEL}"`);
+      if (status === 429) throw new Error('Rate limit hit — try again shortly');
+    }
+    console.error('❌ OpenRouter call failed:', error.message);
     throw error;
   }
 }
 
-async function generateAssessmentQuestions(field, level, count = 5) {
-  const prompt = `Generate exactly ${count} multiple-choice questions for a ${level} level assessment in ${field}.
-
-CRITICAL: Return ONLY valid JSON array, no markdown.
-
-Format:
-[
-  {
-    "question": "Question text",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
-    "correctAnswer": "Option A",
-    "explanation": "Why it is correct",
-    "hint": "Helpful hint",
-    "bloomLevel": "understand",
-    "topic": "Specific topic"
-  }
-]
-
-Requirements:
-- Exactly ${count} questions
-- correctAnswer must match one option exactly
-- bloomLevel: remember, understand, apply, analyze, evaluate, or create`;
-
-  try {
-    const response = await callOpenRouter(prompt);
-    const cleaned = cleanJSONResponse(response);
-    const questions = JSON.parse(cleaned);
-
-    // Validation
-    if (!Array.isArray(questions)) throw new Error('Not an array');
-
-    // Normalize
-    return questions.slice(0, count).map((q, i) => ({
-      question: q.question || `Question ${i + 1}`,
-      options: Array.isArray(q.options) ? q.options.slice(0, 4) : ['A', 'B', 'C', 'D'],
-      correctAnswer: q.correctAnswer || (q.options ? q.options[0] : 'A'),
-      explanation: q.explanation || 'No explanation provided.',
-      hint: q.hint || 'No hint available.',
-      bloomLevel: q.bloomLevel || 'understand',
-      topic: q.topic || field
-    }));
-  } catch (error) {
-    console.error('AI Gen Questions Failed:', error.message);
-    // Return robust fallback questions so the UI continues to work
-    return [
-      {
-        question: "What does HTML stand for?",
-        options: ["Hyper Text Markup Language", "High Tech Modern Language", "Hyper Transfer Mark Language", "Home Tool Markup Language"],
-        correctAnswer: "Hyper Text Markup Language",
-        explanation: "HTML is the standard markup language for documents designed to be displayed in a web browser.",
-        hint: "It's the standard markup language for Web pages.",
-        bloomLevel: "remember",
-        topic: "Web Fundamentals"
-      },
-      {
-        question: "Which CSS property is used to change the text color of an element?",
-        options: ["text-color", "color", "font-color", "fg-color"],
-        correctAnswer: "color",
-        explanation: "The color property specifies the color of text.",
-        hint: "It's just the word for color.",
-        bloomLevel: "remember",
-        topic: "CSS"
-      },
-      {
-        question: "In JavaScript, which symbol is used for comments?",
-        options: ["//", "<!--", "#", "**"],
-        correctAnswer: "//",
-        explanation: "Double slashes // are used for single-line comments in JavaScript.",
-        hint: "It's the same as C++ and Java.",
-        bloomLevel: "remember",
-        topic: "JavaScript"
-      },
-      {
-        question: "What is the primary function of a database?",
-        options: ["To style web pages", "To store and manage data", "To execute Python code", "To create user interfaces"],
-        correctAnswer: "To store and manage data",
-        explanation: "Databases are organized collections of data, generally stored and accessed electronically.",
-        hint: "Think 'Data' base.",
-        bloomLevel: "understand",
-        topic: "Databases"
-      },
-      {
-        question: "Which of these is a version control system?",
-        options: ["Node.js", "React", "Git", "Docker"],
-        correctAnswer: "Git",
-        explanation: "Git is a distributed version control system for tracking changes in source code.",
-        hint: "It's used by GitHub.",
-        bloomLevel: "understand",
-        topic: "Tools"
-      }
-    ];
-  }
-}
-
+// ============================================================================
+// generateLearningPath  ← KEY FIX: better prompt + 8000 tokens + subtopics
+// ============================================================================
 async function generateLearningPath(field, level, goals, quizResults = null) {
   const goalsText = Array.isArray(goals) ? goals.join(', ') : goals;
 
-  let quizContext = "";
+  let quizContext = '';
   if (quizResults) {
     const score = quizResults.score || 0;
     const total = quizResults.total || 5;
     const percentage = (score / total) * 100;
-    const weakTopics = quizResults.details?.filter(d => !d.isCorrect).map(d => d.topic).join(', ') || "none";
+    const weakTopics = quizResults.details?.filter(d => !d.isCorrect).map(d => d.topic).join(', ') || 'none';
+    let instruction = percentage < 40
+      ? 'Student struggled. Include a Foundations module as Week 1.'
+      : percentage > 80
+        ? 'Student excelled. Skip basics, focus on advanced topics.'
+        : `Average performance. Cover weak topics early: ${weakTopics}.`;
+    quizContext = `\nDIAGNOSTIC: Score ${score}/${total} (${percentage.toFixed(0)}%). ${instruction}`;
+  }
 
-    let adaptationInstruction = "";
-    if (percentage < 40) {
-      adaptationInstruction = "CRITICAL: The student struggled with the diagnostic (Score < 40%). You MUST include a dedicated 'Foundations & Review' module as Week 1 to bridge gaps, even if the requested level is higher.";
-    } else if (percentage > 80) {
-      adaptationInstruction = "CRITICAL: The student performed excellently (Score > 80%). You MUST skip generic basics and focus on advanced concepts, case studies, and complex applications immediately.";
-    } else {
-      adaptationInstruction = `The student has an average grasp. Ensure to specifically cover these weak topics in early modules: ${weakTopics}.`;
+  const prompt = `Create an 8-week learning roadmap for a ${level} student learning ${field}.
+Goals: ${goalsText}${quizContext}
+
+Return ONLY valid JSON, no markdown, no extra text.
+
+IMPORTANT: Keep ALL descriptions under 12 words. This is critical to avoid truncation.
+
+{
+  "modules": [
+    {
+      "title": "Week 1: Topic Name",
+      "description": "One sentence overview of this week.",
+      "duration": "1 week",
+      "topics": [
+        {
+          "title": "Short Topic Title",
+          "description": "What this topic covers in 10 words.",
+          "subtopics": [
+            { "title": "Subtopic Name", "description": "Brief 8-word description" },
+            { "title": "Subtopic Name", "description": "Brief 8-word description" },
+            { "title": "Subtopic Name", "description": "Brief 8-word description" },
+            { "title": "Subtopic Name", "description": "Brief 8-word description" }
+          ]
+        }
+      ]
     }
+  ]
+}
 
-    quizContext = `
-    DIAGNOSTIC RESULTS:
-    - Score: ${score}/${total}
-    - Weak Topics: ${weakTopics}
-    - ADAPTATION INSTRUCTION: ${adaptationInstruction}
-    `;
-  }
-
-  const prompt = `Create a comprehensive 8-week personalized learning roadmap for a ${level} level student in ${field}.
-  Student goals: ${goalsText}
-  ${quizContext}
-  
-  CRITICAL: Return ONLY valid JSON, no markdown.
-  
-  Instructions:
-  1. Act as an expert PERSONAL TUTOR. Write in an encouraging, instructional tone (e.g., "Start by...", "I want you to...").
-  2. Break down the course into 8 Modules (one per Week).
-  3. Inside each module, provide 3-5 concrete Topics/Tasks.
-  4. Prefix Topic titles with a timeline (e.g., "Day 1-2: [Topic]").
-  5. The 'description' must be a detailed, step-by-step guide on WHAT to do.
-  
-  Format:
-  {
-    "modules": [
-      {
-        "title": "Week 1: [Module Name]",
-        "description": "In this first week, we will focus on establishing your foundation...",
-        "duration": "1 week",
-        "topics": [
-          {
-            "title": "Day 1-2: [Topic Title]",
-            "description": "First, download VS Code. Then, create a new file called index.html. I want you to practice writing standard HTML5 boilerplate..."
-          }
-        ]
-      }
-    ]
-  }
-  
-  Generate 8 modules.`;
+Generate exactly 8 modules. Each module must have exactly 5 topics. Each topic must have exactly 4 subtopics. Field: ${field}, Level: ${level}.`;
 
   try {
-    const response = await callOpenRouter(prompt, 3500);
+    const response = await callOpenRouter(prompt, 8000);
     const cleaned = cleanJSONResponse(response);
-    let learningPath = JSON.parse(cleaned);
+    const learningPath = JSON.parse(cleaned);
 
-    if (!learningPath.modules) throw new Error('No modules found');
+    if (!learningPath.modules || learningPath.modules.length === 0) {
+      throw new Error('No modules in response');
+    }
 
+    console.log(`✅ generateLearningPath: ${learningPath.modules.length} modules, first module has ${learningPath.modules[0].topics?.length} topics`);
     return learningPath;
+
   } catch (error) {
-    console.error('AI Path Gen Failed:', error);
+    console.error('❌ generateLearningPath failed:', error.message);
+    // Fallback with proper subtopics structure so UI doesn't break
     return {
       modules: Array.from({ length: 4 }, (_, i) => ({
-        title: `Module ${i + 1}: ${field} Basics`,
-        description: 'Fallback module content',
+        title: `Week ${i + 1}: ${field} Foundations`,
+        description: `Core ${field} concepts for week ${i + 1}.`,
         duration: '1 week',
         topics: [
-          { title: 'Intro', description: 'Basics' },
-          { title: 'Practice', description: 'Hands on' }
+          {
+            title: 'Core Concepts',
+            description: 'Fundamental ideas and terminology.',
+            subtopics: [
+              { title: 'Introduction', description: 'Overview and context' },
+              { title: 'Key Terms', description: 'Essential vocabulary to know' },
+              { title: 'Core Principles', description: 'Foundational rules and patterns' },
+              { title: 'Quick Reference', description: 'Summary and cheat sheet' }
+            ]
+          },
+          {
+            title: 'Hands-on Practice',
+            description: 'Apply concepts through exercises.',
+            subtopics: [
+              { title: 'Guided Exercise', description: 'Follow along with examples' },
+              { title: 'Mini Project', description: 'Build something from scratch' },
+              { title: 'Common Mistakes', description: 'Pitfalls and how to avoid them' },
+              { title: 'Self Assessment', description: 'Check your understanding' }
+            ]
+          }
         ]
       }))
     };
   }
 }
 
+// ============================================================================
+// generateResourceRecommendations
+// ============================================================================
 async function generateResourceRecommendations(field, level, weakTopics) {
   const topicsText = Array.isArray(weakTopics) ? weakTopics.join(', ') : 'general concepts';
 
-  const prompt = `As an expert teacher, provide a comprehensive lesson plan for ${level} ${field}, focusing on: ${topicsText}.
-    
-    CRITICAL: Return ONLY valid JSON.
-    
-    Requirements:
-    1. **Content**: A detailed, 300-500 word explanatory guide/mini-lesson on the topic. Use clear sections (Introduction, Key Concepts, Examples, Summary).
-    2. **Resources**: 5 high-quality links (YouTube, Books, Web).
-    
-    Format:
+  const prompt = `As an expert teacher, provide a lesson plan for ${level} ${field}, focusing on: ${topicsText}.
+
+Return ONLY valid JSON. No markdown.
+
+{
+  "content": "### Introduction\\nThis topic covers...\\n\\n### Key Concepts\\n1. **Concept A**: ...",
+  "recommendations": [
     {
-      "content": "### Introduction\\nThis topic covers...\\n\\n### Key Concepts\\n1. **Concept A**: ...", 
-      "recommendations": [
-        {
-          "type": "youtube", 
-          "title": "Video Title",
-          "url": "https://youtube.com/...", 
-          "difficulty": "Intermediate", 
-          "topic": "Concept"
-        }
-      ]
-    }`;
+      "type": "youtube",
+      "title": "Video Title",
+      "url": "https://youtube.com/...",
+      "difficulty": "Intermediate",
+      "topic": "Concept"
+    }
+  ]
+}
+
+Requirements:
+- content: 300-500 word explanatory mini-lesson with sections
+- recommendations: 5 high-quality links (YouTube, articles, docs)`;
 
   try {
-    const response = await callOpenRouter(prompt);
+    const response = await callOpenRouter(prompt, 4000);
     const cleaned = cleanJSONResponse(response);
-    const res = JSON.parse(cleaned);
-    return res;
+    return JSON.parse(cleaned);
   } catch (error) {
-    console.error('AI Resource/Content Gen Failed:', error);
+    console.error('❌ generateResourceRecommendations failed:', error.message);
     return {
-      content: `### Overview\nHere is a brief overview of ${topicsText}.\n\n(AI generation failed, please consult resources)`,
-      recommendations: [
-        { type: 'article', title: `${field} Documentation`, url: 'https://docs.google.com', difficulty: level, topic: field }
-      ]
+      content: `### Overview\nHere is a brief overview of ${topicsText}.\n\n(AI generation failed — please consult external resources.)`,
+      recommendations: [{ type: 'article', title: `${field} Documentation`, url: 'https://docs.google.com', difficulty: level, topic: field }]
     };
   }
 }
 
+// ============================================================================
+// generateQuizFromContext
+// ============================================================================
 async function generateQuizFromContext(topic, contextText, count = 5) {
-  const prompt = `Generate exactly ${count} multiple-choice questions for a student learning about: "${topic}".
-  Context/Description: "${contextText}".
+  const prompt = `Generate exactly ${count} multiple-choice questions about: "${topic}".
+Context: "${contextText}".
+Return ONLY a valid JSON array. No markdown.
 
-  CRITICAL: Return ONLY valid JSON array, no markdown.
-
-  Format:
-  [
-    {
-      "question": "Question text",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correctAnswer": "Option A",
-      "explanation": "Why it is correct",
-      "hint": "Helpful hint"
-    }
-  ]`;
+[
+  {
+    "question": "Question text",
+    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "correctAnswer": "Option A",
+    "explanation": "Brief explanation under 20 words.",
+    "hint": "Helpful hint."
+  }
+]`;
 
   try {
-    const response = await callOpenRouter(prompt);
+    const response = await callOpenRouter(prompt, 5000);
     const cleaned = cleanJSONResponse(response);
     const questions = JSON.parse(cleaned);
-
     if (!Array.isArray(questions)) throw new Error('Not an array');
-
     return questions.slice(0, count).map((q, i) => ({
       question: q.question || `Question ${i + 1}`,
       options: Array.isArray(q.options) ? q.options.slice(0, 4) : ['A', 'B', 'C', 'D'],
@@ -334,59 +276,37 @@ async function generateQuizFromContext(topic, contextText, count = 5) {
       hint: q.hint || 'No hint available.'
     }));
   } catch (error) {
-    console.error('AI Quiz Gen Failed:', error.message);
-    return [
-      {
-        question: `What is a key concept in ${topic}?`,
-        options: ["Concept A", "Concept B", "Concept C", "Concept D"],
-        correctAnswer: "Concept A",
-        explanation: "This is a fallback question.",
-        hint: "Pick the first option."
-      }
-    ];
+    console.error('❌ generateQuizFromContext failed:', error.message);
+    return [{ question: `What is a key concept in ${topic}?`, options: ['Concept A', 'Concept B', 'Concept C', 'Concept D'], correctAnswer: 'Concept A', explanation: 'Fallback question.', hint: 'Pick the first option.' }];
   }
 }
 
+// ============================================================================
+// generateTopicQuiz
+// ============================================================================
 async function generateTopicQuiz(topic, className, level, bloomLevel = 'understand', contextText = '') {
-  const prompt = `You are an expert instructor.
-  
-  Generate 10 multiple-choice questions based on the topic "${topic}"
-  for a student enrolled in the class "${className}".
-  
-  Student level: ${level}
-  Cognitive level: ${bloomLevel} (Bloom's Taxonomy)
-  Context: ${contextText}
-  
-  Rules:
-  - Questions must be strictly related to the topic
-  - Assume standard syllabus-level coverage
-  - Include practical and conceptual questions
-  - Include code snippets where relevant
-  - Provide explanation and learning hint
-  - Do NOT reference any specific video or document
-  - Return ONLY valid JSON
-  - Do NOT add markdown or extra text
-  
-  Output format:
-  [
-    {
-      "question": "Question text",
-      "code": "Optional code snippet",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correctAnswer": "Option A (Exact match)",
-      "explanation": "Explanation here",
-      "hint": "Hint here",
-      "difficulty": 1-10
-    }
-  ]`;
+  const prompt = `Generate 10 multiple-choice questions on "${topic}" for "${className}" (${level} level, ${bloomLevel} Bloom's level).
+Context: ${contextText}
+Return ONLY a valid JSON array. No markdown.
+
+[
+  {
+    "question": "Question text",
+    "code": "",
+    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "correctAnswer": "Option A",
+    "explanation": "Brief explanation under 20 words.",
+    "hint": "Short hint.",
+    "difficulty": 5
+  }
+]`;
 
   try {
-    const response = await callOpenRouter(prompt, 4000);
+    const response = await callOpenRouter(prompt, 6000);
     const cleaned = cleanJSONResponse(response);
     const questions = JSON.parse(cleaned);
-
     if (!Array.isArray(questions)) throw new Error('Not an array');
-
+    console.log(`✅ generateTopicQuiz: got ${questions.length} questions`);
     return questions.map((q, i) => ({
       question: q.question || `Question ${i + 1}`,
       code: q.code || '',
@@ -397,17 +317,69 @@ async function generateTopicQuiz(topic, className, level, bloomLevel = 'understa
       difficulty: q.difficulty || 5
     }));
   } catch (error) {
-    console.error('AI Topic Quiz Gen Failed:', error.message);
-    // Fallback
+    console.error('❌ generateTopicQuiz failed:', error.message);
     return Array.from({ length: 5 }, (_, i) => ({
-      question: `Fallback: What is a key concept in ${topic}?`,
-      options: ["Concept A", "Concept B", "Concept C", "Concept D"],
-      correctAnswer: "Concept A",
-      explanation: "This is a fallback question (AI unavailable).",
-      hint: "Select the first option.",
+      question: `Fallback Q${i + 1}: Key concept in ${topic}?`,
+      code: '',
+      options: ['Concept A', 'Concept B', 'Concept C', 'Concept D'],
+      correctAnswer: 'Concept A',
+      explanation: 'Fallback — AI unavailable.',
+      hint: 'Select the first option.',
       difficulty: 1
     }));
   }
+}
+
+// ============================================================================
+// generateAssessmentQuestions
+// ============================================================================
+async function generateAssessmentQuestions(field, level, count = 5) {
+  const prompt = `Generate exactly ${count} multiple-choice questions for a ${level} level assessment in ${field}.
+Return ONLY a valid JSON array. No markdown.
+
+[
+  {
+    "question": "Question text here",
+    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "correctAnswer": "Option A",
+    "explanation": "Brief explanation under 20 words.",
+    "hint": "One short hint.",
+    "bloomLevel": "remember",
+    "topic": "Topic name"
+  }
+]
+
+correctAnswer must exactly match one of the 4 options.`;
+
+  try {
+    const response = await callOpenRouter(prompt, 5000);
+    const cleaned = cleanJSONResponse(response);
+    const questions = JSON.parse(cleaned);
+    if (!Array.isArray(questions) || questions.length === 0) throw new Error('Invalid response');
+    console.log(`✅ Generated ${questions.length}/${count} questions`);
+    return questions.slice(0, count).map((q, i) => ({
+      question: q.question || `Question ${i + 1}`,
+      options: Array.isArray(q.options) ? q.options.slice(0, 4) : ['A', 'B', 'C', 'D'],
+      correctAnswer: q.correctAnswer || (q.options ? q.options[0] : 'A'),
+      explanation: q.explanation || 'No explanation provided.',
+      hint: q.hint || 'No hint available.',
+      bloomLevel: q.bloomLevel || 'understand',
+      topic: q.topic || field
+    }));
+  } catch (error) {
+    console.error('❌ generateAssessmentQuestions failed:', error.message);
+    return getAssessmentFallback();
+  }
+}
+
+function getAssessmentFallback() {
+  return [
+    { question: 'What does HTML stand for?', options: ['Hyper Text Markup Language', 'High Tech Modern Language', 'Hyper Transfer Mark Language', 'Home Tool Markup Language'], correctAnswer: 'Hyper Text Markup Language', explanation: 'HTML is the standard markup language for Web pages.', hint: "Standard markup language.", bloomLevel: 'remember', topic: 'Web Fundamentals' },
+    { question: 'Which CSS property changes text color?', options: ['text-color', 'color', 'font-color', 'fg-color'], correctAnswer: 'color', explanation: 'The color property specifies text color.', hint: "It's just the word for color.", bloomLevel: 'remember', topic: 'CSS' },
+    { question: 'Which symbol starts a JS single-line comment?', options: ['//', '<!--', '#', '**'], correctAnswer: '//', explanation: 'Double slashes start single-line comments.', hint: 'Same as C++ and Java.', bloomLevel: 'remember', topic: 'JavaScript' },
+    { question: "What is a database's primary function?", options: ['Style web pages', 'Store and manage data', 'Execute Python code', 'Create user interfaces'], correctAnswer: 'Store and manage data', explanation: 'Databases store organized collections of data.', hint: "Think 'Data' base.", bloomLevel: 'understand', topic: 'Databases' },
+    { question: 'Which is a version control system?', options: ['Node.js', 'React', 'Git', 'Docker'], correctAnswer: 'Git', explanation: 'Git is a distributed version control system.', hint: "Used by GitHub.", bloomLevel: 'understand', topic: 'Tools' }
+  ];
 }
 
 module.exports = {

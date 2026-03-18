@@ -15,6 +15,7 @@ import ClassView from './pages/ClassView';
 import AIPathCurriculum from './pages/AIPathCurriculum';
 import DashboardLayout from './layouts/DashboardLayout';
 import StudentAnalytics from './pages/StudentAnalytics';
+import ProfileSettings from './pages/ProfileSettings'; // ← ADD THIS
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
@@ -33,7 +34,6 @@ function App() {
           <Route path="/register" element={<Register />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
 
-
           <Route path="/onboarding" element={
             <ProtectedRoute><Onboarding /></ProtectedRoute>
           } />
@@ -49,6 +49,7 @@ function App() {
             <Route path="/class/:courseId" element={<ClassView />} />
             <Route path="/ai-path" element={<AIPathCurriculum />} />
             <Route path="/ai-course/module/:moduleId/topic/:topicId" element={<CourseView />} />
+            <Route path="/profile" element={<ProfileSettings />} /> {/* ← ADD THIS */}
           </Route>
         </Routes>
       </Router>

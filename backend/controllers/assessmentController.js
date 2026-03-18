@@ -1,27 +1,21 @@
 const Assessment = require('../models/Assessment');
 const Course = require('../models/Course');
+const StudentProfile = require('../models/StudentProfile');
 const aiService = require('../services/ai-service');
 
+// ============================================================================
+// Generate Assessment (Onboarding / Practice)
+// ============================================================================
 exports.generateAssessment = async (req, res) => {
     try {
         const { field, level, count, type, topic } = req.body;
 
-        // Logic to check if user needs to pay or has limits? (Skip for now)
-
         const questions = await aiService.generateAssessmentQuestions(field, level, count || 5);
-
-        // Return questions to frontend (don't save yet, or save as "draft" assessment?)
-        // Usually we send questions, user answers, then we submit.
-        // To be secure, maybe we don't send the `correctAnswer` in the response?
 
         const sanitizedQuestions = questions.map(q => {
             const { correctAnswer, ...rest } = q;
-            return rest; // Remove answer from client response
+            return rest; // Don't send correct answer to client
         });
-
-        // We might want to cache the correct answers in session or db
-        // For simplicity, let's assume we trust the client or we store it in a temp collection.
-        // Better approach: Store the assessment as 'pending' in DB.
 
         const assessment = new Assessment({
             userId: req.user.id,
@@ -30,7 +24,7 @@ exports.generateAssessment = async (req, res) => {
             level,
             topic,
             questions: questions.map(q => ({
-                questionJson: q, // Store full Q with Answer
+                questionJson: q, // Store full Q with answer server-side
                 userAnswer: null
             }))
         });
@@ -45,34 +39,72 @@ exports.generateAssessment = async (req, res) => {
     }
 };
 
+// ============================================================================
+// Generate Context Quiz
+// Supports BOTH teacher courses (courseId provided) and AI learning path (no courseId)
+// ============================================================================
 exports.generateContextQuiz = async (req, res) => {
     try {
         const { courseId, moduleId, topicId, bloomLevel } = req.body;
 
-        if (!courseId || !moduleId || !topicId || !bloomLevel) {
-            return res.status(400).json({ error: 'Missing required fields' });
+        if (!moduleId || !topicId || !bloomLevel) {
+            return res.status(400).json({ error: 'moduleId, topicId and bloomLevel are required' });
         }
 
+        // ── Case 1: AI Learning Path (no courseId) ───────────────────────────
+        if (!courseId) {
+            const profile = await StudentProfile.findOne({ userId: req.user.id });
+            if (!profile) {
+                return res.status(404).json({ error: 'Student profile not found' });
+            }
+
+            const moduleDoc = profile.currentPath?.modules.find(
+                m => m.id === moduleId || m._id?.toString() === moduleId
+            );
+            if (!moduleDoc) {
+                return res.status(404).json({ error: 'Module not found in learning path' });
+            }
+
+            const topic = moduleDoc.topics.find(
+                t => t.id === topicId || t._id?.toString() === topicId
+            );
+            if (!topic) {
+                return res.status(404).json({ error: 'Topic not found in learning path' });
+            }
+
+            const questions = await aiService.generateTopicQuiz(
+                topic.title,
+                profile.onboarding.field || 'General',
+                profile.onboarding.level || 'Intermediate',
+                bloomLevel,
+                topic.description || ''
+            );
+
+            return res.json({ quiz: { questions } });
+        }
+
+        // ── Case 2: Teacher Course (courseId provided) ───────────────────────
         const course = await Course.findById(courseId);
         if (!course) return res.status(404).json({ error: 'Course not found' });
 
-        const module = course.modules.find(m => m._id.toString() === moduleId || m.id === moduleId);
+        const module = course.modules.find(
+            m => m._id.toString() === moduleId || m.id === moduleId
+        );
         if (!module) return res.status(404).json({ error: 'Module not found' });
 
-        const topic = module.topics.find(t => t._id.toString() === topicId || t.id === topicId);
+        const topic = module.topics.find(
+            t => t._id.toString() === topicId || t.id === topicId
+        );
         if (!topic) return res.status(404).json({ error: 'Topic not found' });
 
-        // Call AI Service - Use the robust Topic Quiz generation
-        // Requirement: "just on the topic"
         const questions = await aiService.generateTopicQuiz(
             topic.title,
             course.title,
             course.level || 'Intermediate',
             bloomLevel,
-            topic.description || '' // Minimal context
+            topic.description || ''
         );
 
-        // Format for frontend (QuizGenerationModal expects { quiz: { questions: ... } })
         res.json({ quiz: { questions } });
 
     } catch (error) {
@@ -81,14 +113,19 @@ exports.generateContextQuiz = async (req, res) => {
     }
 };
 
+// ============================================================================
+// Submit Assessment
+// ============================================================================
 exports.submitAssessment = async (req, res) => {
     try {
-        const { assessmentId, answers } = req.body; // answers: [{ questionIndex: 0, answer: "Option A" }, ...]
+        const { assessmentId, answers } = req.body; // answers: [{ questionIndex: 0, answer: "Option A" }]
 
         const assessment = await Assessment.findById(assessmentId);
         if (!assessment) return res.status(404).json({ error: 'Assessment not found' });
 
-        if (assessment.userId.toString() !== req.user.id) return res.status(403).json({ error: 'Unauthorized' });
+        if (assessment.userId.toString() !== req.user.id) {
+            return res.status(403).json({ error: 'Unauthorized' });
+        }
 
         let score = 0;
 
@@ -109,8 +146,6 @@ exports.submitAssessment = async (req, res) => {
         assessment.completedAt = Date.now();
 
         await assessment.save();
-
-        // Update user stats (optional calls to other services/models)
 
         res.json({
             score,

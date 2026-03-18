@@ -3,16 +3,14 @@ const mongoose = require('mongoose');
 const studentProfileSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
 
-    // Onboarding Data
     onboarding: {
-        field: String, // e.g., "Web Development"
-        level: String, // e.g., "Beginner"
-        goals: [String], // e.g., ["Career Change", "Freelancing"]
-        learningStyle: String, // e.g., "Visual", "Hands-on"
+        field: String,
+        level: String,
+        goals: [String],
+        learningStyle: String,
         completed: { type: Boolean, default: false }
     },
 
-    // Gamification
     points: { type: Number, default: 0 },
     streak: { type: Number, default: 0 },
     level: { type: Number, default: 1 },
@@ -23,7 +21,6 @@ const studentProfileSchema = new mongoose.Schema({
         awardedAt: { type: Date, default: Date.now }
     }],
 
-    // Stats
     stats: {
         hoursStudied: { type: Number, default: 0 },
         coursesCompleted: { type: Number, default: 0 },
@@ -31,7 +28,6 @@ const studentProfileSchema = new mongoose.Schema({
         avgScore: { type: Number, default: 0 }
     },
 
-    // Learning Path
     currentPath: {
         generatedAt: Date,
         modules: [{
@@ -44,8 +40,15 @@ const studentProfileSchema = new mongoose.Schema({
                 id: String,
                 title: String,
                 description: String,
-                content: String, // Full detailed breakdown/guide
-                status: { type: String, enum: ['pending', 'completed'], default: 'pending' },
+                content: String,
+                status: { type: String, enum: ['pending', 'unlocked', 'completed'], default: 'pending' },
+                // ── NEW: subtopics for roadmap.sh-style breakdown ──
+                subtopics: [{
+                    id: String,
+                    title: String,
+                    description: String,
+                    status: { type: String, enum: ['pending', 'completed'], default: 'pending' }
+                }],
                 resources: [{
                     type: String,
                     title: String,

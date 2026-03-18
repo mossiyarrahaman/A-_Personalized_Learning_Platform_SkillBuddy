@@ -1,62 +1,95 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, BarChart, BookOpen, Trophy, LogOut, Home, MessageSquare } from 'lucide-react';
+import { Menu, BarChart, BookOpen, Trophy, LogOut, Home, MessageSquare, User } from 'lucide-react';
+import { useAppTheme } from '../hooks/Useapptheme';
 
 const Sidebar = ({ onLogout }) => {
     const [isCollapsed, setIsCollapsed] = useState(false);
     const location = useLocation();
+    const { theme, accent } = useAppTheme();
+
+    const aGrad = `linear-gradient(135deg, ${accent.from}, ${accent.to})`;
+
+    const navItems = [
+        { icon: Home, label: 'Dashboard', to: '/dashboard', isActive: location.pathname === '/dashboard' },
+        { icon: BookOpen, label: 'My Courses', to: '/my-courses', isActive: location.pathname.startsWith('/my-courses') || location.pathname.startsWith('/class/') },
+        { icon: MessageSquare, label: 'Doubt Resolution', to: '/doubts', isActive: location.pathname === '/doubts' },
+        { icon: BarChart, label: 'Analytics', to: '/analytics', isActive: location.pathname === '/analytics' },
+        { icon: Trophy, label: 'Leaderboard', to: '/leaderboard', isActive: location.pathname === '/leaderboard' },
+        { icon: User, label: 'Profile', to: '/profile', isActive: location.pathname === '/profile' },
+    ];
 
     return (
-        <aside className={`${isCollapsed ? 'w-20' : 'w-64'} bg-gray-800 border-r border-gray-700 hidden md:flex flex-col transition-all duration-300 h-screen sticky top-0`}>
-            <div className="p-6 border-b border-gray-700 flex items-center justify-between">
+        <aside style={{
+            width: isCollapsed ? '72px' : '240px',
+            background: theme.sidebarBg,
+            borderRight: `1px solid ${theme.border}`,
+            display: 'none',
+            flexDirection: 'column',
+            transition: 'width .3s, background .3s',
+            height: '100vh', position: 'sticky', top: 0, flexShrink: 0
+        }} className="sb-sidebar">
+
+            <style>{`
+                @media (min-width: 768px) { .sb-sidebar { display: flex !important; } }
+                .sb-nav-item:hover { background: ${accent.from}18 !important; color: ${accent.from} !important; }
+                .sb-logout-btn:hover { background: rgba(239,68,68,0.08) !important; color: #f87171 !important; }
+                .sb-menu-btn:hover { background: ${theme.surface} !important; color: ${theme.textPrimary} !important; }
+            `}</style>
+
+            {/* Logo row */}
+            <div style={{ padding: '1.25rem', borderBottom: `1px solid ${theme.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '70px', flexShrink: 0 }}>
                 {!isCollapsed && (
-                    <Link to="/">
-                        <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-600 cursor-pointer hover:opacity-80 transition-opacity">
+                    <Link to="/" style={{ textDecoration: 'none' }}>
+                        <span style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: '1.2rem', background: aGrad, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text', color: 'transparent' }}>
                             SkillBuddy
-                        </h1>
+                        </span>
                     </Link>
                 )}
-                <button
-                    onClick={() => setIsCollapsed(!isCollapsed)}
-                    className="p-1 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition-colors ml-auto"
-                >
+                <button onClick={() => setIsCollapsed(!isCollapsed)} className="sb-menu-btn" style={{
+                    background: 'none', border: 'none', cursor: 'pointer', color: theme.textMuted,
+                    padding: '6px', borderRadius: '8px', display: 'flex', transition: 'all .2s',
+                    marginLeft: isCollapsed ? 'auto' : '0', marginRight: isCollapsed ? 'auto' : '0'
+                }}>
                     <Menu size={20} />
                 </button>
             </div>
 
-            <nav className="flex-1 p-4 space-y-2">
-                <NavItem icon={Home} label="Dashboard" to="/dashboard" isActive={location.pathname === '/dashboard'} isCollapsed={isCollapsed} />
-                <NavItem icon={BookOpen} label="My Courses" to="/my-courses" isActive={location.pathname.startsWith('/my-courses') || location.pathname.startsWith('/class/')} isCollapsed={isCollapsed} />
-                <NavItem icon={MessageSquare} label="Doubt Resolution" to="/doubts" isActive={location.pathname === '/doubts'} isCollapsed={isCollapsed} />
-                <NavItem icon={BarChart} label="Analytics" to="/analytics" isActive={location.pathname === '/analytics'} isCollapsed={isCollapsed} />
-                <NavItem icon={Trophy} label="Leaderboard" to="/leaderboard" isActive={location.pathname === '/leaderboard'} isCollapsed={isCollapsed} />
+            {/* Nav */}
+            <nav style={{ flex: 1, padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                {navItems.map(({ icon: Icon, label, to, isActive }) => (
+                    <Link key={to} to={to} title={isCollapsed ? label : ''} className="sb-nav-item" style={{
+                        display: 'flex', alignItems: 'center',
+                        gap: isCollapsed ? 0 : '0.75rem',
+                        justifyContent: isCollapsed ? 'center' : 'flex-start',
+                        padding: isCollapsed ? '0.7rem' : '0.7rem 0.9rem',
+                        borderRadius: '10px', textDecoration: 'none', fontWeight: 500, fontSize: '13.5px',
+                        background: isActive ? `${accent.from}20` : 'none',
+                        color: isActive ? accent.from : theme.textSecondary,
+                        boxShadow: isActive ? `inset 0 0 0 1px ${accent.from}35` : 'none',
+                        transition: 'all .2s'
+                    }}>
+                        <Icon size={18} style={{ flexShrink: 0 }} />
+                        {!isCollapsed && <span style={{ whiteSpace: 'nowrap' }}>{label}</span>}
+                    </Link>
+                ))}
             </nav>
 
-            <div className="p-4 border-t border-gray-700">
-                <button onClick={onLogout} className={`flex items-center ${isCollapsed ? 'justify-center' : 'space-x-3'} text-gray-400 hover:text-white w-full px-4 py-3 rounded-lg hover:bg-white/5 transition`}>
-                    <LogOut className="w-5 h-5 flex-shrink-0" />
+            {/* Logout */}
+            <div style={{ padding: '0.75rem', borderTop: `1px solid ${theme.border}` }}>
+                <button onClick={onLogout} className="sb-logout-btn" style={{
+                    width: '100%', display: 'flex', alignItems: 'center',
+                    gap: isCollapsed ? 0 : '0.75rem', justifyContent: isCollapsed ? 'center' : 'flex-start',
+                    padding: isCollapsed ? '0.7rem' : '0.7rem 0.9rem',
+                    borderRadius: '10px', border: 'none', background: 'none',
+                    color: theme.textMuted, cursor: 'pointer', fontSize: '13.5px', fontWeight: 500, transition: 'all .2s'
+                }}>
+                    <LogOut size={18} style={{ flexShrink: 0 }} />
                     {!isCollapsed && <span>Logout</span>}
                 </button>
             </div>
         </aside>
     );
-};
-
-const NavItem = ({ icon: Icon, label, to, isCollapsed, isActive }) => {
-    const content = (
-        <>
-            <Icon className="w-5 h-5 flex-shrink-0" />
-            {!isCollapsed && <span className="font-medium whitespace-nowrap">{label}</span>}
-        </>
-    );
-
-    const baseClass = `flex items-center ${isCollapsed ? 'justify-center px-2' : 'space-x-3 px-4'} w-full py-3 rounded-lg transition ${isActive ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20' : 'text-gray-400 hover:text-white hover:bg-white/5'}`;
-
-    if (to) {
-        return <Link to={to} className={baseClass} title={isCollapsed ? label : ''}>{content}</Link>;
-    }
-
-    return <button className={baseClass} title={isCollapsed ? label : ''}>{content}</button>;
 };
 
 export default Sidebar;

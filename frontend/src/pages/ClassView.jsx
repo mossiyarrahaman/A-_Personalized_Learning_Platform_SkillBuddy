@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ChevronLeft, BookOpen, CheckCircle, Circle, Play, FileText, Download, Brain } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../api/axios';
 import ResourcePlayer from '../components/ResourcePlayer';
-import QuizGenerationModal from '../components/QuizGenerationModal';
+import QuizModal from '../components/QuizModal';
 
 
 const ClassView = () => {
@@ -181,13 +180,13 @@ const ClassView = () => {
                 />
             )}
 
-            <QuizGenerationModal
+            <QuizModal
                 isOpen={quizModalOpen}
                 onClose={() => setQuizModalOpen(false)}
                 courseId={courseId}
                 moduleId={quizTarget?.moduleId}
                 topicId={quizTarget?.topicId}
-                topicTitle={quizTarget?.topicTitle}
+                topicTitle={quizTarget?.topicTitle || ''}
             />
         </div>
     );

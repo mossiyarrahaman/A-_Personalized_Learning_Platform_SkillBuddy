@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Menu, Users, BookOpen, BarChart, LogOut, Home, Plus, MessageCircle, X, Edit, ListChecks } from 'lucide-react';
 import api from '../api/axios';
 import AnalyticsDashboard from '../components/AnalyticsDashboard';
+import TeacherQuizAnalytics from '../components/TeacherQuizAnalytics';
 import CurriculumBuilder from '../components/CurriculumBuilder';
 import DoubtReplyModal from '../components/DoubtReplyModal';
 import ManageStudentsModal from '../components/ManageStudentsModal';
@@ -235,9 +236,9 @@ const TeacherDashboard = ({ user, onLogout }) => {
                 );
             case 'analytics':
                 return (
-                    // Now using the Real Component
-                    <div className="bg-gray-900 rounded-xl">
+                    <div className="bg-gray-900 rounded-xl space-y-8">
                         <AnalyticsDashboard courses={courses} />
+                        <TeacherQuizAnalytics courses={courses} />
                     </div>
                 );
             default:
@@ -445,4 +446,3 @@ const StatCard = ({ icon: Icon, label, value, color }) => (
 );
 
 export default TeacherDashboard;
-

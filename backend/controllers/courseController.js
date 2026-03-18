@@ -4,19 +4,23 @@ const Progress = require('../models/Progress');
 const User = require('../models/User'); // Added User model
 const aiService = require('../services/ai-service');
 
-// Generate a personalized learning path
+// ============================================================================
+// REPLACE ONLY the generatePath function in courseController.js
+// Find the existing exports.generatePath and replace it with this:
+// ============================================================================
+
 exports.generatePath = async (req, res) => {
     try {
         const { field, level, goals, quizResults } = req.body;
         const userId = req.user.id;
 
-        console.log(`Generating path for user ${userId} in ${field} (${level}) with quiz score: ${quizResults?.score}`);
+        console.log(`Generating path for user ${userId} in ${field} (${level})`);
 
         let pathData;
         try {
             pathData = await aiService.generateLearningPath(field, level, goals, quizResults);
         } catch (e) {
-            console.error("AI Generation failed, using fallback", e);
+            console.error("AI Generation failed", e);
             return res.status(500).json({ error: "Failed to generate learning path via AI" });
         }
 
@@ -24,28 +28,36 @@ exports.generatePath = async (req, res) => {
         if (profile) {
             profile.onboarding = { field, level, goals, completed: true };
 
-            // Map AI modules to Schema
             profile.currentPath = {
                 generatedAt: new Date(),
-                modules: pathData.modules.map(m => ({
-                    id: new Date().getTime().toString() + Math.random(), // Simple ID gen
+                modules: pathData.modules.map((m, mIdx) => ({
+                    id: `module_${Date.now()}_${mIdx}`,
                     title: m.title,
                     description: m.description,
                     duration: m.duration,
                     status: 'locked',
-                    topics: m.topics ? m.topics.map(t => ({
+                    topics: (m.topics || []).map((t, tIdx) => ({
                         id: Math.random().toString(36).substr(2, 9),
                         title: t.title,
                         description: t.description,
                         status: 'pending',
-                        resources: [] // To be populated later
-                    })) : []
+                        // ── Map subtopics from AI response ──
+                        subtopics: (t.subtopics || []).map((s, sIdx) => ({
+                            id: Math.random().toString(36).substr(2, 9),
+                            title: s.title,
+                            description: s.description,
+                            status: 'pending'
+                        })),
+                        resources: []
+                    }))
                 }))
             };
 
             // Unlock first module
             if (profile.currentPath.modules.length > 0) {
                 profile.currentPath.modules[0].status = 'unlocked';
+                // Also set first topic to unlocked so student knows where to start
+
             }
 
             await profile.save();

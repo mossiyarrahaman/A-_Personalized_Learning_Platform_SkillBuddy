@@ -1,0 +1,85 @@
+[
+  {
+    "question": "What does HTML stand for?",
+    "options": ["Hyper Text Markup Language", "High Tech Modern Language", "Hyper Transfer Make Language", "Home Tool Markup Language"],
+    "correctAnswer": "Hyper Text Markup Language",
+    "explanation": "HTML stands for Hyper Text Markup Language and defines the structure of web content.",
+    "hint": "It is the core language of the web.",
+    "bloomLevel": "remember",
+    "topic": "HTML Basics"
+  },
+  {
+    "question": "Which CSS property controls the text color?",
+    "options": ["text-color", "color", "font-color", "background-color"],
+    "correctAnswer": "color",
+    "explanation": "The 'color' property sets the foreground color of text inside an element.",
+    "hint": "It relates to the appearance of the text itself.",
+    "bloomLevel": "understand",
+    "topic": "CSS Styling"
+  },
+  {
+    "question": "Which symbol is used to declare a variable in JavaScript?",
+    "options": ["var", "int", "float", "byte"],
+    "correctAnswer": "var",
+    "explanation": "The 'var' keyword is used to declare variables in JavaScript, though let and const are also common.",
+    "hint": "It is the traditional way to create a variable.",
+    "bloomLevel": "remember",
+    "topic": "JavaScript Basics"
+  },
+  {
+    "question": "What is the main purpose of the alt attribute in an img tag?",
+    "options": ["To set the border", "To provide alternative text for accessibility", "To define the width", "To link to another page"],
+    "correctAnswer": "To provide alternative text for accessibility",
+    "explanation": "The alt attribute ensures accessibility by describing the image for users who cannot see it.",
+    "hint": "It helps screen readers understand the image content.",
+    "bloomLevel": "understand",
+    "topic": "HTML Accessibility"
+  },
+  {
+    "question": "Which tag is used to create a hyperlink in HTML?",
+    "options": ["<link>", "<a>", "<p>", "<div>"],
+    "correctAnswer": "<a>",
+    "explanation": "The <a> tag stands for anchor and is specifically
+
+---CLEANED---
+
+{
+    "question": "What does HTML stand for?",
+    "options": ["Hyper Text Markup Language", "High Tech Modern Language", "Hyper Transfer Make Language", "Home Tool Markup Language"],
+    "correctAnswer": "Hyper Text Markup Language",
+    "explanation": "HTML stands for Hyper Text Markup Language and defines the structure of web content.",
+    "hint": "It is the core language of the web.",
+    "bloomLevel": "remember",
+    "topic": "HTML Basics"
+  },
+  {
+    "question": "Which CSS property controls the text color?",
+    "options": ["text-color", "color", "font-color", "background-color"],
+    "correctAnswer": "color",
+    "explanation": "The 'color' property sets the foreground color of text inside an element.",
+    "hint": "It relates to the appearance of the text itself.",
+    "bloomLevel": "understand",
+    "topic": "CSS Styling"
+  },
+  {
+    "question": "Which symbol is used to declare a variable in JavaScript?",
+    "options": ["var", "int", "float", "byte"],
+    "correctAnswer": "var",
+    "explanation": "The 'var' keyword is used to declare variables in JavaScript, though let and const are also common.",
+    "hint": "It is the traditional way to create a variable.",
+    "bloomLevel": "remember",
+    "topic": "JavaScript Basics"
+  },
+  {
+    "question": "What is the main purpose of the alt attribute in an img tag?",
+    "options": ["To set the border", "To provide alternative text for accessibility", "To define the width", "To link to another page"],
+    "correctAnswer": "To provide alternative text for accessibility",
+    "explanation": "The alt attribute ensures accessibility by describing the image for users who cannot see it.",
+    "hint": "It helps screen readers understand the image content.",
+    "bloomLevel": "understand",
+    "topic": "HTML Accessibility"
+  }
+
+---ERROR---
+
+Unexpected non-whitespace character after JSON at position 453 (line 9 column 4)

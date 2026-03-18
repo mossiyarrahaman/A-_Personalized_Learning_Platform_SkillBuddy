@@ -6,7 +6,7 @@
 const axios = require('axios');
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const AI_MODEL = process.env.AI_MODEL || 'meta-llama/llama-3.3-70b-instruct:free';
+const AI_MODEL = process.env.AI_MODEL || 'qwen/qwen3.5-9b';
 
 // Load the Master AI Prompt
 const MASTER_SYSTEM_PROMPT = `
