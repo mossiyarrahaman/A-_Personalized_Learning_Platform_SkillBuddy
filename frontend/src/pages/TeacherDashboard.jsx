@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Menu, Users, BookOpen, BarChart, LogOut, Home, Plus, MessageCircle, X, Edit, ListChecks } from 'lucide-react';
 import api from '../api/axios';
-import AnalyticsDashboard from '../components/AnalyticsDashboard';
-import TeacherQuizAnalytics from '../components/TeacherQuizAnalytics';
+import TeacherAnalytics from '../components/TeacherAnalytics';
 import CurriculumBuilder from '../components/CurriculumBuilder';
 import DoubtReplyModal from '../components/DoubtReplyModal';
 import ManageStudentsModal from '../components/ManageStudentsModal';
@@ -35,7 +34,6 @@ const TeacherDashboard = ({ user, onLogout }) => {
         if (activeSection === 'students') fetchStudents();
         if (activeSection === 'courses') fetchCourses();
         if (activeSection === 'doubts') fetchDoubts();
-        // Analytics fetches its own data based on selection
     }, [activeSection]);
 
     const fetchOverviewData = async () => {
@@ -50,7 +48,6 @@ const TeacherDashboard = ({ user, onLogout }) => {
                 courses: coursesRes.data.courses.length,
                 doubts: doubtsRes.data.doubts.filter(d => d.status !== 'answered').length
             });
-            // Update courses list for dropdowns if needed
             setCourses(coursesRes.data.courses);
         } catch (error) {
             console.error("Error fetching overview data:", error);
@@ -106,8 +103,8 @@ const TeacherDashboard = ({ user, onLogout }) => {
         try {
             await api.post('/courses/create', data);
             setShowCreateModal(false);
-            fetchCourses(); // Refresh courses
-            fetchOverviewData(); // Refresh stats
+            fetchCourses();
+            fetchOverviewData();
             alert("Class created successfully!");
         } catch (error) {
             console.error("Error creating course:", error);
@@ -129,12 +126,10 @@ const TeacherDashboard = ({ user, onLogout }) => {
                             <StatCard icon={MessageCircle} label="Pending Doubts" value={stats.doubts} color="bg-pink-600" />
                         </div>
 
-                        {/* Quick Analytics Preview */}
                         <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
                             <h3 className="text-xl font-bold text-white mb-4">Class Performance Snapshot</h3>
                             <p className="text-gray-400 mb-4">Overview of one of your active courses.</p>
-                            {/* Re-use Analytics component but simplified or just show full for now */}
-                            {courses.length > 0 ? <AnalyticsDashboard courses={[courses[0]]} /> : <p className="text-gray-500">No courses to display analytics for.</p>}
+                            {courses.length > 0 ? <TeacherAnalytics courses={[courses[0]]} /> : <p className="text-gray-500">No courses to display analytics for.</p>}
                         </div>
                     </div>
                 );
@@ -235,12 +230,7 @@ const TeacherDashboard = ({ user, onLogout }) => {
                     </div>
                 );
             case 'analytics':
-                return (
-                    <div className="bg-gray-900 rounded-xl space-y-8">
-                        <AnalyticsDashboard courses={courses} />
-                        <TeacherQuizAnalytics courses={courses} />
-                    </div>
-                );
+                return <TeacherAnalytics courses={courses} />;
             default:
                 return null;
         }
@@ -270,41 +260,11 @@ const TeacherDashboard = ({ user, onLogout }) => {
                 </div>
 
                 <nav className="flex-1 p-4 space-y-2">
-                    <NavItem
-                        icon={Home}
-                        label="Overview"
-                        active={activeSection === 'overview'}
-                        onClick={() => setActiveSection('overview')}
-                        isCollapsed={isSidebarCollapsed}
-                    />
-                    <NavItem
-                        icon={Users}
-                        label="Students"
-                        active={activeSection === 'students'}
-                        onClick={() => setActiveSection('students')}
-                        isCollapsed={isSidebarCollapsed}
-                    />
-                    <NavItem
-                        icon={BookOpen}
-                        label="Courses"
-                        active={activeSection === 'courses'}
-                        onClick={() => setActiveSection('courses')}
-                        isCollapsed={isSidebarCollapsed}
-                    />
-                    <NavItem
-                        icon={MessageCircle}
-                        label="Doubts"
-                        active={activeSection === 'doubts'}
-                        onClick={() => setActiveSection('doubts')}
-                        isCollapsed={isSidebarCollapsed}
-                    />
-                    <NavItem
-                        icon={BarChart}
-                        label="Analytics"
-                        active={activeSection === 'analytics'}
-                        onClick={() => setActiveSection('analytics')}
-                        isCollapsed={isSidebarCollapsed}
-                    />
+                    <NavItem icon={Home} label="Overview" active={activeSection === 'overview'} onClick={() => setActiveSection('overview')} isCollapsed={isSidebarCollapsed} />
+                    <NavItem icon={Users} label="Students" active={activeSection === 'students'} onClick={() => setActiveSection('students')} isCollapsed={isSidebarCollapsed} />
+                    <NavItem icon={BookOpen} label="Courses" active={activeSection === 'courses'} onClick={() => setActiveSection('courses')} isCollapsed={isSidebarCollapsed} />
+                    <NavItem icon={MessageCircle} label="Doubts" active={activeSection === 'doubts'} onClick={() => setActiveSection('doubts')} isCollapsed={isSidebarCollapsed} />
+                    <NavItem icon={BarChart} label="Analytics" active={activeSection === 'analytics'} onClick={() => setActiveSection('analytics')} isCollapsed={isSidebarCollapsed} />
                 </nav>
 
                 <div className="p-4 border-t border-gray-700">
@@ -377,7 +337,6 @@ const TeacherDashboard = ({ user, onLogout }) => {
                     </div>
                 )}
 
-                {/* Curriculum Builder Overlay */}
                 {editingCourse && (
                     <CurriculumBuilder
                         courseId={editingCourse._id}
@@ -386,35 +345,23 @@ const TeacherDashboard = ({ user, onLogout }) => {
                         initialTitle={editingCourse.title}
                         initialDescription={editingCourse.description}
                         onClose={() => setEditingCourse(null)}
-                        onSave={() => {
-                            setEditingCourse(null);
-                            fetchCourses();
-                        }}
+                        onSave={() => { setEditingCourse(null); fetchCourses(); }}
                     />
                 )}
-                {/* Doubt Reply Modal - NEW */}
+
                 {replyingDoubt && (
                     <DoubtReplyModal
                         doubt={replyingDoubt}
                         onClose={() => setReplyingDoubt(null)}
-                        onReplySuccess={() => {
-                            fetchDoubts(); // Refresh doubts list
-                            fetchOverviewData(); // Refresh stats
-                        }}
+                        onReplySuccess={() => { fetchDoubts(); fetchOverviewData(); }}
                     />
                 )}
 
-                {/* Manage Students Modal */}
                 {managingStudentsCourse && (
                     <ManageStudentsModal
                         course={managingStudentsCourse}
                         onClose={() => setManagingStudentsCourse(null)}
-                        onUpdate={() => {
-                            fetchCourses();
-                            // Optional: Close modal or keep open. If keep open, we need to update managingStudentsCourse 
-                            // to reflect new student list. For now, let's close it to ensure state sync.
-                            setManagingStudentsCourse(null);
-                        }}
+                        onUpdate={() => { fetchCourses(); setManagingStudentsCourse(null); }}
                     />
                 )}
             </main>

@@ -1,49 +1,57 @@
 // ─── Quiz Result Storage ──────────────────────────────────────────────────────
-// Saves quiz results to localStorage as primary store (works without backend)
-// and also POSTs to API when available.
-// Both QuizModal and StudentAnalytics use this module.
+// Pure localStorage — no dynamic imports, no backend dependency.
+// Works 100% offline. Backend save is attempted separately from QuizModal.
 
-const STORAGE_KEY = 'sb_quiz_results';
+import api from '../api/axios';
 
-export const saveQuizResult = async (result) => {
-    // 1. Always save to localStorage immediately
+const KEY = 'sb_quiz_results';
+
+// Save one result to localStorage (and try backend)
+export const saveQuizResult = (result) => {
+    // 1. localStorage — always works, synchronous
     try {
-        const existing = getLocalResults();
-        const updated = [result, ...existing].slice(0, 200); // keep last 200
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+        const prev = getLocalResults();
+        const next = [{ ...result, savedAt: new Date().toISOString() }, ...prev].slice(0, 500);
+        localStorage.setItem(KEY, JSON.stringify(next));
+        console.log('[QuizStorage] Saved locally:', result.topicTitle, result.pct + '%');
     } catch (e) {
-        console.warn('localStorage save failed', e);
+        console.warn('[QuizStorage] localStorage error:', e);
     }
 
-    // 2. Also try to save to backend (non-blocking)
-    try {
-        const api = (await import('../api/axios')).default;
-        await api.post('/courses/save-quiz-result', result);
-    } catch {
-        // Backend not ready — localStorage already has it, that's fine
-    }
+    // 2. Backend — fire and forget, don't await
+    api.post('/courses/save-quiz-result', result).catch(() => {
+        // Backend endpoint not set up yet — that's fine, localStorage has it
+    });
 };
 
+// Read all results from localStorage
 export const getLocalResults = () => {
     try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        return raw ? JSON.parse(raw) : [];
+        const raw = localStorage.getItem(KEY);
+        if (!raw) return [];
+        return JSON.parse(raw);
     } catch {
         return [];
     }
 };
 
-export const getAllResults = async () => {
-    // Try backend first, fall back to localStorage
-    try {
-        const api = (await import('../api/axios')).default;
-        const res = await api.get('/courses/quiz-results');
-        const backendResults = res.data.results || [];
-        if (backendResults.length > 0) return backendResults;
-    } catch { }
-    return getLocalResults();
+// Clear all results (for testing)
+export const clearResults = () => {
+    try { localStorage.removeItem(KEY); } catch { }
 };
 
-export const clearResults = () => {
-    try { localStorage.removeItem(STORAGE_KEY); } catch { }
-};
+// Debug helper — call from browser console: window.debugQuiz()
+if (typeof window !== 'undefined') {
+    window.debugQuiz = () => {
+        const results = getLocalResults();
+        console.table(results.map(r => ({
+            topic: r.topicTitle,
+            score: r.pct + '%',
+            correct: `${r.score}/${r.total}`,
+            difficulty: r.difficulty,
+            mistakes: r.mistakes?.length || 0,
+            when: r.completedAt,
+        })));
+        return results;
+    };
+}

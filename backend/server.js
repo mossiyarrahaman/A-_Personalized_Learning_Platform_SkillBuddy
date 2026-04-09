@@ -32,6 +32,8 @@ app.use('/api/doubts', require('./routes/doubtRoutes'));
 app.use('/api/gamification', require('./routes/gamificationRoutes'));
 app.use('/api/ai-assistant', require('./routes/aiAssistantRoutes'));
 app.use('/api/upload', require('./routes/uploadRoutes'));
+app.use('/api/analytics', require('./routes/analyticsRoutes'));
+app.use('/api/rag', require('./routes/rag'));
 
 // Serve Uploads
 app.use('/uploads', express.static('uploads'));

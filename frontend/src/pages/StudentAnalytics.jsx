@@ -174,7 +174,13 @@ const StudentAnalytics = () => {
 
     // Re-read when quiz results change (storage event from QuizModal)
     useEffect(() => {
-        const handler = (e) => { if (e?.key === 'sb_quiz_results' || !e?.key) loadData(); };
+        const handler = (e) => {
+            // React to our quiz key OR any storage event
+            if (!e.key || e.key === 'sb_quiz_results') {
+                console.log('[Analytics] Storage event - reloading data');
+                loadData();
+            }
+        };
         window.addEventListener('storage', handler);
         return () => window.removeEventListener('storage', handler);
     }, [loadData]);
@@ -210,9 +216,14 @@ const StudentAnalytics = () => {
                         <p style={{ fontSize: '12px', color: theme.textMuted, marginTop: '3px' }}>Progress · Quizzes · Study hours · Mastery</p>
                     </div>
                 </div>
-                <button onClick={() => setQuizModal({ topicTitle: 'General Knowledge' })} style={{ background: aGrad, border: 'none', borderRadius: '10px', padding: '9px 18px', color: '#fff', fontWeight: 700, fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '7px', boxShadow: `0 4px 16px ${accent.glow}`, fontFamily: "'DM Sans',sans-serif" }}>
-                    <Brain size={15} /> Take a Quiz
-                </button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <button onClick={loadData} style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '9px 14px', color: theme.textSecondary, fontWeight: 600, fontSize: '13px', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }} title="Refresh analytics">
+                        ↻ Refresh
+                    </button>
+                    <button onClick={() => setQuizModal({ topicTitle: 'General Knowledge' })} style={{ background: aGrad, border: 'none', borderRadius: '10px', padding: '9px 18px', color: '#fff', fontWeight: 700, fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '7px', boxShadow: `0 4px 16px ${accent.glow}`, fontFamily: "'DM Sans',sans-serif" }}>
+                        <Brain size={15} /> Take a Quiz
+                    </button>
+                </div>
             </div>
 
             {/* KPI cards */}
