@@ -55,7 +55,25 @@ const studentProfileSchema = new mongoose.Schema({
                     url: String,
                     duration: String,
                     completed: Boolean
-                }]
+                }],
+                plan: {
+                    objectives: [String],
+                    estimatedTime: String,
+                    generatedAt: Date,
+                    steps: [{
+                        stepNumber: Number,
+                        title: String,
+                        explanation: String,
+                        action: String,
+                        estimatedTime: String,
+                        completed: { type: Boolean, default: false },
+                        resources: [{
+                            type: String,
+                            title: String,
+                            url: String
+                        }]
+                    }]
+                }
             }]
         }]
     },

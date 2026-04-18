@@ -103,6 +103,32 @@ exports.toggleTopicComplete = async (req, res) => {
     }
 };
 
+exports.toggleStepComplete = async (req, res) => {
+    try {
+        const { moduleId, topicId, stepNumber, completed } = req.body;
+        const userId = req.user.id;
+
+        const profile = await StudentProfile.findOne({ userId });
+        if (!profile) return res.status(404).json({ error: 'Profile not found' });
+
+        const moduleDoc = profile.currentPath.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
+        if (!moduleDoc) return res.status(404).json({ error: 'Module not found' });
+
+        const topicDoc = moduleDoc.topics.find(t => t.id === topicId || t._id.toString() === topicId);
+        if (!topicDoc || !topicDoc.plan) return res.status(404).json({ error: 'Topic or plan not found' });
+
+        const step = topicDoc.plan.steps.find(s => s.stepNumber === stepNumber);
+        if (!step) return res.status(404).json({ error: 'Step not found' });
+
+        step.completed = completed;
+        await profile.save();
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error toggling step:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
 exports.getOnboardingAssessment = async (req, res) => {
     try {
         const { field, level } = req.body;
@@ -188,28 +214,32 @@ exports.getTopicDetails = async (req, res) => {
 
         if (!topicDoc) return res.status(404).json({ error: 'Topic not found' });
 
-        // If context is AI Path and resources are empty, generate them!
-        if (contextType === 'ai_path' && (!topicDoc.resources || topicDoc.resources.length === 0)) {
-            const profile = await StudentProfile.findOne({ userId }); // Re-fetch to be safe/clean
-            console.log(`Generating resources for topic: ${topicDoc.title}`);
-            const resourcesData = await aiService.generateResourceRecommendations(
-                profile.onboarding.field,
-                profile.onboarding.level,
-                [topicDoc.title]
-            );
+        // If AI Path and plan not yet generated, build the step-by-step plan now
+        if (contextType === 'ai_path' && (!topicDoc.plan || !topicDoc.plan.steps || topicDoc.plan.steps.length === 0)) {
+            const profile = await StudentProfile.findOne({ userId });
+            const moduleDoc2 = profile.currentPath.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
+            const topicToUpdate = moduleDoc2?.topics.find(t => t.id === topicId || t._id.toString() === topicId);
 
-            topicDoc.resources = resourcesData.recommendations.map(r => ({
-                type: r.type.toLowerCase(),
-                title: r.title,
-                url: r.url,
-                duration: '10 min',
-                completed: false
-            }));
+            if (topicToUpdate) {
+                console.log(`Generating step plan for topic: ${topicToUpdate.title}`);
+                const planData = await aiService.generateTopicStepPlan(
+                    profile.onboarding.field,
+                    profile.onboarding.level,
+                    topicToUpdate.title,
+                    moduleDoc2.title,
+                    topicToUpdate.subtopics || []
+                );
 
-            // Save the detailed content/notes
-            topicDoc.content = resourcesData.content;
+                topicToUpdate.plan = {
+                    objectives: planData.objectives,
+                    estimatedTime: planData.estimatedTime,
+                    generatedAt: new Date(),
+                    steps: planData.steps
+                };
 
-            await profile.save();
+                await profile.save();
+                topicDoc = topicToUpdate;
+            }
         }
 
         res.json({ topic: topicDoc });

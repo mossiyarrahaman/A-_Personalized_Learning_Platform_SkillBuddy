@@ -382,10 +382,130 @@ function getAssessmentFallback() {
   ];
 }
 
+// ============================================================================
+// generateTopicStepPlan  ← topic-wise step-by-step learning plan
+// ============================================================================
+async function generateTopicStepPlan(field, level, topicTitle, moduleTitle, subtopics = []) {
+  const subtopicsText = subtopics.map(s => s.title).filter(Boolean).join(', ') || topicTitle;
+
+  const prompt = `Create a detailed step-by-step learning plan for the topic "${topicTitle}" \
+(module: "${moduleTitle}") for a ${level} learner studying ${field}.
+Subtopics to cover: ${subtopicsText}
+
+Return ONLY valid JSON. No markdown, no extra text.
+
+{
+  "objectives": [
+    "Student will be able to explain...",
+    "Student will be able to build...",
+    "Student will understand..."
+  ],
+  "estimatedTime": "2-3 hours",
+  "steps": [
+    {
+      "stepNumber": 1,
+      "title": "Step title (max 8 words)",
+      "explanation": "2 sentence explanation of what to learn and why it matters.",
+      "action": "Specific action: e.g. Watch the video, Read the docs, Build a mini-project, Complete the exercise.",
+      "estimatedTime": "20 min",
+      "resources": [
+        { "type": "youtube", "title": "Resource title", "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ" },
+        { "type": "article", "title": "Resource title", "url": "https://developer.mozilla.org" }
+      ]
+    }
+  ]
+}
+
+Requirements:
+- Exactly 5 to 6 steps that progress logically from understanding to hands-on practice
+- Each step must have exactly 2 resources with real, working URLs (YouTube videos or authoritative articles)
+- objectives: exactly 3 clear, actionable learning outcomes starting with "Student will"
+- estimatedTime per step: realistic (10-30 min range)
+- Keep explanation under 2 sentences
+Field: ${field}, Level: ${level}, Topic: ${topicTitle}`;
+
+  try {
+    const response = await callOpenRouter(prompt, 5000);
+    const cleaned = cleanJSONResponse(response);
+    const plan = JSON.parse(cleaned);
+
+    if (!plan.steps || plan.steps.length === 0) throw new Error('No steps in response');
+
+    plan.steps = plan.steps.slice(0, 6).map((s, i) => ({
+      stepNumber: i + 1,
+      title: s.title || `Step ${i + 1}`,
+      explanation: s.explanation || '',
+      action: s.action || '',
+      estimatedTime: s.estimatedTime || '15 min',
+      completed: false,
+      resources: Array.isArray(s.resources) ? s.resources.slice(0, 2).map(r => ({
+        type: (r.type || 'article').toLowerCase(),
+        title: r.title || 'Resource',
+        url: r.url || '#'
+      })) : []
+    }));
+
+    plan.objectives = Array.isArray(plan.objectives) ? plan.objectives.slice(0, 3) : [];
+    plan.estimatedTime = plan.estimatedTime || '2 hours';
+
+    console.log(`✅ generateTopicStepPlan: ${plan.steps.length} steps for "${topicTitle}"`);
+    return plan;
+  } catch (error) {
+    console.error('❌ generateTopicStepPlan failed:', error.message);
+    return {
+      objectives: [
+        `Student will be able to explain core concepts of ${topicTitle}`,
+        `Student will be able to apply ${topicTitle} in practical scenarios`,
+        `Student will understand best practices for ${topicTitle}`
+      ],
+      estimatedTime: '2 hours',
+      steps: [
+        {
+          stepNumber: 1,
+          title: 'Understand the Fundamentals',
+          explanation: `Learn the core concepts behind ${topicTitle} and why they matter in ${field}.`,
+          action: 'Read the official documentation or an introductory article.',
+          estimatedTime: '20 min',
+          completed: false,
+          resources: [
+            { type: 'article', title: `Introduction to ${topicTitle}`, url: 'https://developer.mozilla.org' },
+            { type: 'youtube', title: `${topicTitle} Explained`, url: 'https://www.youtube.com/results?search_query=' + encodeURIComponent(topicTitle) }
+          ]
+        },
+        {
+          stepNumber: 2,
+          title: 'Study Key Concepts',
+          explanation: `Explore the most important ideas and patterns within ${topicTitle}.`,
+          action: 'Watch a tutorial video and take notes on key patterns.',
+          estimatedTime: '30 min',
+          completed: false,
+          resources: [
+            { type: 'youtube', title: `${topicTitle} Tutorial`, url: 'https://www.youtube.com/results?search_query=' + encodeURIComponent(topicTitle + ' tutorial') },
+            { type: 'article', title: `${topicTitle} Guide`, url: 'https://www.freecodecamp.org' }
+          ]
+        },
+        {
+          stepNumber: 3,
+          title: 'Practice with Examples',
+          explanation: `Reinforce your understanding by working through real-world examples.`,
+          action: 'Complete 2-3 practice exercises or code challenges.',
+          estimatedTime: '40 min',
+          completed: false,
+          resources: [
+            { type: 'article', title: `${topicTitle} Examples`, url: 'https://www.w3schools.com' },
+            { type: 'article', title: `${topicTitle} Exercises`, url: 'https://exercism.org' }
+          ]
+        }
+      ]
+    };
+  }
+}
+
 module.exports = {
   generateAssessmentQuestions,
   generateLearningPath,
   generateResourceRecommendations,
+  generateTopicStepPlan,
   generateQuizFromContext,
   generateTopicQuiz,
   callOpenRouter
