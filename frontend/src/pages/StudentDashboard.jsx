@@ -4,6 +4,7 @@ import { BookOpen, Trophy, Clock, Search, Bell, User } from 'lucide-react';
 import RoadmapTree from '../components/RoadmapTree';
 import TopicDetailModal from '../components/TopicDetailModal';
 import { useAppTheme } from '../hooks/Useapptheme';
+import api from '../api/axios';
 
 const StudentDashboard = ({ user, profile, onLogout, fetchProfile }) => {
     const navigate = useNavigate();
@@ -11,6 +12,31 @@ const StudentDashboard = ({ user, profile, onLogout, fetchProfile }) => {
     const [selectedTopic, setSelectedTopic] = useState(null);
     const [showProfileMenu, setShowProfileMenu] = useState(false);
     const aGrad = `linear-gradient(135deg, ${accent.from}, ${accent.to})`;
+
+    const handleTopicToggle = async (moduleId, topicId, status) => {
+        try {
+            await api.post('/courses/path/toggle-topic', { moduleId, topicId, status });
+            fetchProfile();
+        } catch (err) {
+            console.error('Error toggling topic:', err);
+        }
+    };
+
+    const handleQuizComplete = async (result, moduleId, topicId) => {
+        try {
+            await api.post('/courses/path/submit-ai-quiz', {
+                moduleId,
+                topicId,
+                topicTitle: result.topicTitle,
+                score: result.pct,
+                totalQuestions: result.total,
+                correctAnswers: result.score,
+            });
+            fetchProfile();
+        } catch (err) {
+            console.error('Error submitting quiz result:', err);
+        }
+    };
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', width: '100%', background: theme.bg, color: theme.textPrimary, fontFamily: "'DM Sans', sans-serif", transition: 'background .3s, color .3s' }}>
@@ -95,7 +121,12 @@ const StudentDashboard = ({ user, profile, onLogout, fetchProfile }) => {
                     </div>
 
                     {profile?.currentPath ? (
-                        <RoadmapTree modules={profile.currentPath.modules} onTopicClick={(moduleId, topicId) => setSelectedTopic({ moduleId, topicId })} />
+                        <RoadmapTree
+                            modules={profile.currentPath.modules}
+                            onTopicClick={(moduleId, topicId) => setSelectedTopic({ moduleId, topicId })}
+                            onTopicToggle={handleTopicToggle}
+                            onQuizComplete={handleQuizComplete}
+                        />
                     ) : (
                         <div style={{ textAlign: 'center', padding: '4rem 2rem', margin: '0 2rem 2rem', background: theme.surface, borderRadius: '1rem', border: `1px dashed ${theme.border}`, position: 'relative', zIndex: 1 }}>
                             <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>🎯</div>

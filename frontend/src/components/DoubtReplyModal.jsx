@@ -1,8 +1,12 @@
 import React, { useState, useRef } from 'react';
-import { X, Mic, Square, Paperclip, Send, Loader, PhoneCall } from 'lucide-react';
+import { X, Mic, Square, Send, Loader } from 'lucide-react';
 import api from '../api/axios';
+import { useAppTheme } from '../hooks/useAppTheme';
 
 const DoubtReplyModal = ({ doubt, onClose, onReplySuccess }) => {
+    const { theme, accent } = useAppTheme();
+    const aGrad = `linear-gradient(135deg,${accent.from},${accent.to})`;
+
     const [replyContent, setReplyContent] = useState('');
     const [audioBlob, setAudioBlob] = useState(null);
     const [isRecording, setIsRecording] = useState(false);
@@ -10,8 +14,6 @@ const DoubtReplyModal = ({ doubt, onClose, onReplySuccess }) => {
     const mediaRecorderRef = useRef(null);
     const timerRef = useRef(null);
     const [sending, setSending] = useState(false);
-
-    // Attachments can be URLs for now in this MVP
     const [attachmentUrl, setAttachmentUrl] = useState('');
 
     const startRecording = async () => {
@@ -19,29 +21,18 @@ const DoubtReplyModal = ({ doubt, onClose, onReplySuccess }) => {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             mediaRecorderRef.current = new MediaRecorder(stream);
             const chunks = [];
-
-            mediaRecorderRef.current.ondataavailable = (e) => {
-                if (e.data.size > 0) chunks.push(e.data);
-            };
-
+            mediaRecorderRef.current.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
             mediaRecorderRef.current.onstop = () => {
                 const blob = new Blob(chunks, { type: 'audio/webm' });
                 setAudioBlob(blob);
-                // In a real app, we would upload this Blob to S3/Cloudinary here
             };
-
             mediaRecorderRef.current.start();
             setIsRecording(true);
-
-            // Timer
             setRecordingTime(0);
-            timerRef.current = setInterval(() => {
-                setRecordingTime(prev => prev + 1);
-            }, 1000);
-
+            timerRef.current = setInterval(() => setRecordingTime(prev => prev + 1), 1000);
         } catch (err) {
-            console.error("Error accessing microphone:", err);
-            alert("Microphone access denied or not available.");
+            console.error('Error accessing microphone:', err);
+            alert('Microphone access denied or not available.');
         }
     };
 
@@ -57,130 +48,127 @@ const DoubtReplyModal = ({ doubt, onClose, onReplySuccess }) => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         setSending(true);
-
         try {
-            // Mocking File Upload for Audio - In prod, use FormData to upload file
             let audioUrl = null;
-            if (audioBlob) {
-                // For demo purposes, we create a local object URL or a fake server URL
-                // audioUrl = URL.createObjectURL(audioBlob); 
-                // Since this won't persist across sessions, let's pretend we got a URL back
-                audioUrl = "https://example.com/audio-ex-" + Date.now() + ".mp3";
-            }
-
+            if (audioBlob) audioUrl = 'https://example.com/audio-ex-' + Date.now() + '.mp3';
             const payload = {
                 content: replyContent,
-                audioUrl: audioUrl,
+                audioUrl,
                 attachments: attachmentUrl ? [{ type: 'link', url: attachmentUrl, name: 'Attachment' }] : []
             };
-
             await api.post(`/doubts/${doubt._id}/reply`, payload);
-            alert("Reply sent successfully!");
+            alert('Reply sent successfully!');
             onReplySuccess();
             onClose();
-
         } catch (error) {
-            console.error("Error sending reply:", error);
-            alert("Failed to send reply.");
+            console.error('Error sending reply:', error);
+            alert('Failed to send reply.');
         } finally {
             setSending(false);
         }
     };
 
-    const formatTime = (seconds) => {
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+    const formatTime = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
+    const inputStyle = {
+        width: '100%', background: theme.bg, border: `1px solid ${theme.border}`,
+        borderRadius: '10px', padding: '11px 14px', color: theme.textPrimary,
+        fontSize: '14px', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit',
     };
 
     return (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-            <div className="bg-gray-800 rounded-2xl w-full max-w-lg border border-gray-700 shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
-                <div className="p-6 border-b border-gray-700 flex justify-between items-center">
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.80)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', zIndex: 60 }}>
+            <div style={{ background: theme.surface, borderRadius: '20px', width: '100%', maxWidth: '520px', border: `1px solid ${theme.border}`, boxShadow: `0 0 60px ${accent.glow}`, overflow: 'hidden', fontFamily: "'DM Sans', sans-serif" }}>
+
+                {/* Header */}
+                <div style={{ padding: '20px 24px', borderBottom: `1px solid ${theme.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
-                        <h3 className="text-xl font-bold text-white">Reply to Student</h3>
-                        <p className="text-gray-400 text-xs mt-1">Replying to: {doubt.title}</p>
+                        <h3 style={{ fontSize: '16px', fontWeight: 700, color: theme.textPrimary, margin: 0, fontFamily: "'Sora', sans-serif" }}>Reply to Student</h3>
+                        <p style={{ fontSize: '12px', color: theme.textMuted, marginTop: '3px' }}>Replying to: {doubt.title}</p>
                     </div>
-                    <button onClick={onClose} className="text-gray-400 hover:text-white">
-                        <X className="w-5 h-5" />
-                    </button>
+                    <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: theme.textMuted, display: 'flex', padding: '4px', borderRadius: '6px' }}
+                        onMouseEnter={e => e.currentTarget.style.color = theme.textPrimary}
+                        onMouseLeave={e => e.currentTarget.style.color = theme.textMuted}
+                    ><X size={18} /></button>
                 </div>
 
-                <div className="p-6 space-y-6">
-                    {/* Original Query Context */}
-                    <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700 text-sm text-gray-300 italic">
+                <div style={{ padding: '22px 24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                    {/* Original query */}
+                    <div style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '12px 16px', fontSize: '13px', color: theme.textSecondary, fontStyle: 'italic', lineHeight: 1.6 }}>
                         "{doubt.description}"
                     </div>
 
-                    {/* Text Reply */}
+                    {/* Text reply */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-2">Your Answer</label>
+                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Your Answer</label>
                         <textarea
                             value={replyContent}
-                            onChange={(e) => setReplyContent(e.target.value)}
-                            rows="4"
-                            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-purple-500 outline-none resize-none"
+                            onChange={e => setReplyContent(e.target.value)}
+                            rows={4}
+                            style={{ ...inputStyle, resize: 'none' }}
+                            onFocus={e => e.target.style.borderColor = accent.from}
+                            onBlur={e => e.target.style.borderColor = theme.border}
                             placeholder="Type your explanation here..."
-                        ></textarea>
+                        />
                     </div>
 
-                    {/* Audio Recorder */}
+                    {/* Audio recorder */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-2">Voice Note (Optional)</label>
-                        <div className="flex items-center space-x-4">
+                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Voice Note (Optional)</label>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             {!isRecording && !audioBlob && (
-                                <button
-                                    type="button"
-                                    onClick={startRecording}
-                                    className="flex items-center space-x-2 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-full transition-colors"
+                                <button type="button" onClick={startRecording}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '7px', background: 'none', border: `1px solid ${theme.border}`, borderRadius: '20px', padding: '7px 14px', color: theme.textSecondary, cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}
+                                    onMouseEnter={e => { e.currentTarget.style.borderColor = accent.from; e.currentTarget.style.color = accent.from; }}
+                                    onMouseLeave={e => { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.color = theme.textSecondary; }}
                                 >
-                                    <Mic className="w-4 h-4" />
-                                    <span>Record Audio</span>
+                                    <Mic size={13} /> Record Audio
                                 </button>
                             )}
-
                             {isRecording && (
-                                <button
-                                    type="button"
-                                    onClick={stopRecording}
-                                    className="flex items-center space-x-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-full animate-pulse transition-colors"
+                                <button type="button" onClick={stopRecording}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '7px', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: '20px', padding: '7px 14px', color: '#ef4444', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
                                 >
-                                    <Square className="w-4 h-4" />
-                                    <span>Stop ({formatTime(recordingTime)})</span>
+                                    <Square size={13} /> Stop ({formatTime(recordingTime)})
                                 </button>
                             )}
-
                             {audioBlob && (
-                                <div className="flex items-center space-x-3 bg-green-500/20 px-4 py-2 rounded-full border border-green-500/30">
-                                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                                    <span className="text-green-400 text-sm">Audio Recorded</span>
-                                    <button onClick={() => setAudioBlob(null)} className="text-gray-400 hover:text-white ml-2"><X className="w-3 h-3" /></button>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(34,197,94,0.10)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: '20px', padding: '7px 14px' }}>
+                                    <div style={{ width: '7px', height: '7px', background: '#22c55e', borderRadius: '50%' }} />
+                                    <span style={{ color: '#22c55e', fontSize: '13px' }}>Audio Recorded</span>
+                                    <button onClick={() => setAudioBlob(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: theme.textMuted, display: 'flex', marginLeft: '4px' }}><X size={11} /></button>
                                 </div>
                             )}
                         </div>
                     </div>
 
-                    {/* Simple Link Attachment */}
+                    {/* Resource link */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-2">Resource Link (Video/Doc)</label>
+                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>Resource Link (Optional)</label>
                         <input
                             type="url"
-                            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 outline-none text-sm"
+                            style={inputStyle}
+                            onFocus={e => e.target.style.borderColor = accent.from}
+                            onBlur={e => e.target.style.borderColor = theme.border}
                             placeholder="e.g. https://docs.google.com/..."
                             value={attachmentUrl}
-                            onChange={(e) => setAttachmentUrl(e.target.value)}
+                            onChange={e => setAttachmentUrl(e.target.value)}
                         />
                     </div>
                 </div>
 
-                <div className="p-6 border-t border-gray-700 bg-gray-800/50 flex justify-end">
-                    <button
-                        onClick={handleSubmit}
-                        disabled={sending}
-                        className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 shadow-lg shadow-purple-900/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                {/* Footer */}
+                <div style={{ padding: '16px 24px', borderTop: `1px solid ${theme.border}`, display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                    <button onClick={onClose}
+                        style={{ padding: '10px 18px', background: 'none', border: `1px solid ${theme.border}`, borderRadius: '10px', color: theme.textSecondary, cursor: 'pointer', fontSize: '13px', fontWeight: 600, fontFamily: 'inherit' }}
+                        onMouseEnter={e => e.currentTarget.style.borderColor = theme.borderHover || theme.textMuted}
+                        onMouseLeave={e => e.currentTarget.style.borderColor = theme.border}
+                    >Cancel</button>
+                    <button onClick={handleSubmit} disabled={sending}
+                        style={{ padding: '10px 22px', background: aGrad, border: 'none', borderRadius: '10px', color: '#fff', cursor: sending ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '7px', opacity: sending ? 0.7 : 1, boxShadow: `0 4px 14px ${accent.glow}`, fontFamily: 'inherit' }}
                     >
-                        {sending ? <Loader className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                        {sending ? "Sending..." : "Send Reply"}
+                        {sending ? <Loader size={13} className="animate-spin" /> : <Send size={13} />}
+                        {sending ? 'Sending...' : 'Send Reply'}
                     </button>
                 </div>
             </div>

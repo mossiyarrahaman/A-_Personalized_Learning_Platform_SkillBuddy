@@ -208,6 +208,26 @@ exports.forgotPassword = async (req, res) => {
     }
 };
 
+exports.changePassword = async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        if (!currentPassword || !newPassword)
+            return res.status(400).json({ error: 'Both current and new password are required.' });
+        if (newPassword.length < 8)
+            return res.status(400).json({ error: 'New password must be at least 8 characters.' });
+        const user = await User.findById(req.user.id);
+        if (!user) return res.status(404).json({ error: 'User not found.' });
+        const match = await user.comparePassword(currentPassword);
+        if (!match) return res.status(400).json({ error: 'Current password is incorrect.' });
+        user.password = newPassword; // pre-save hook will hash it
+        await user.save();
+        res.json({ message: 'Password updated successfully.' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error.' });
+    }
+};
+
 exports.resetPassword = async (req, res) => {
     try {
         const { email, otp, newPassword } = req.body;

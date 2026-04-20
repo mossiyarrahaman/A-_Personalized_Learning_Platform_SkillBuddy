@@ -35,6 +35,9 @@ const studentProfileSchema = new mongoose.Schema({
             title: String,
             description: String,
             duration: String,
+            difficultyLevel: { type: String, enum: ['beginner', 'intermediate', 'advanced', 'expert', 'production'], default: 'beginner' },
+            goalStatement: { type: String, default: '' },
+            practiceProjects: [{ type: String }],
             status: { type: String, enum: ['locked', 'unlocked', 'completed'], default: 'locked' },
             topics: [{
                 id: String,
@@ -64,11 +67,16 @@ const studentProfileSchema = new mongoose.Schema({
                         stepNumber: Number,
                         title: String,
                         explanation: String,
+                        teacherNote: String,
+                        exampleCode: String,
+                        exampleExplanation: String,
+                        keyPoints: [String],
+                        commonMistake: String,
                         action: String,
                         estimatedTime: String,
                         completed: { type: Boolean, default: false },
                         resources: [{
-                            type: String,
+                            type: { type: String },
                             title: String,
                             url: String
                         }]

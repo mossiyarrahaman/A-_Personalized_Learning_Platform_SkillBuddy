@@ -4,44 +4,44 @@ import { useNavigate } from 'react-router-dom';
 import { GraduationCap, ArrowRight, Loader, Brain } from 'lucide-react';
 import { motion } from 'framer-motion';
 import api from '../api/axios';
+import { useAppTheme } from '../hooks/useAppTheme';
 
 const MyCourses = () => {
     const navigate = useNavigate();
-    const [activeTab, setActiveTab] = useState('ai-path'); // 'ai-path' or 'classes'
+    const { theme, accent } = useAppTheme();
+    const aGrad = `linear-gradient(135deg,${accent.from},${accent.to})`;
+
+    const [activeTab, setActiveTab] = useState('ai-path');
     const [aiProfile, setAiProfile] = useState(null);
     const [enrolledClasses, setEnrolledClasses] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        fetchData();
-    }, []);
+    useEffect(() => { fetchData(); }, []);
 
     const fetchData = async () => {
         setLoading(true);
         try {
             const [profileRes, classesRes] = await Promise.all([
-                api.get('/courses/dashboard'), // Gets AI profile
+                api.get('/courses/dashboard'),
                 api.get('/courses/student/enrolled-classes')
             ]);
-
             setAiProfile(profileRes.data.profile);
             setEnrolledClasses(classesRes.data.classes);
         } catch (error) {
-            console.error("Error fetching courses:", error);
+            console.error('Error fetching courses:', error);
         } finally {
             setLoading(false);
         }
     };
 
     if (loading) return (
-        <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-            <Loader className="w-12 h-12 text-purple-500 animate-spin" />
+        <div style={{ minHeight: '100vh', background: theme.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Loader style={{ color: accent.from, width: 44, height: 44 }} className="animate-spin" />
         </div>
     );
 
     const hasAIPath = aiProfile && aiProfile.currentPath;
 
-    // Helper to calculate AI progress
     const getAIProgress = () => {
         if (!hasAIPath) return 0;
         const modules = aiProfile.currentPath.modules || [];
@@ -53,89 +53,96 @@ const MyCourses = () => {
     const aiProgress = getAIProgress();
 
     return (
-        <div className="flex flex-col h-full w-full overflow-hidden bg-gray-900 text-white font-sans">
-            <div className="max-w-7xl mx-auto w-full flex flex-col h-full">
-                <header className="sticky top-0 z-50 bg-gray-900/95 backdrop-blur-md border-b border-gray-800 p-8 mb-0 flex-shrink-0 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all">
-                    <div>
-                        <h1 className="text-3xl font-black mb-1">My Learning</h1>
-                        <p className="text-gray-400">Manage your personalized path and enrolled classes.</p>
-                    </div>
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', overflow: 'hidden', background: theme.bg, color: theme.textPrimary, fontFamily: "'DM Sans', sans-serif" }}>
+            <div style={{ maxWidth: '1280px', margin: '0 auto', width: '100%', display: 'flex', flexDirection: 'column', height: '100%' }}>
 
-                    <div className="flex bg-gray-800 p-1 rounded-xl">
-                        <button
-                            onClick={() => setActiveTab('ai-path')}
-                            className={`px-6 py-2 rounded-lg font-bold transition-all ${activeTab === 'ai-path' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}
-                        >
-                            AI Learning Path
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('classes')}
-                            className={`px-6 py-2 rounded-lg font-bold transition-all ${activeTab === 'classes' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}
-                        >
-                            Enrolled Classes
-                        </button>
+                {/* Header */}
+                <header style={{ position: 'sticky', top: 0, zIndex: 50, background: theme.headerBg, backdropFilter: 'blur(12px)', borderBottom: `1px solid ${theme.border}`, padding: '24px 32px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
+                        <div>
+                            <h1 style={{ fontSize: '26px', fontWeight: 800, color: theme.textPrimary, margin: 0, lineHeight: 1.2 }}>My Learning</h1>
+                            <p style={{ fontSize: '14px', color: theme.textMuted, marginTop: '4px' }}>Manage your personalized path and enrolled classes.</p>
+                        </div>
+
+                        {/* Tab switcher */}
+                        <div style={{ display: 'flex', background: theme.surface, padding: '4px', borderRadius: '12px', border: `1px solid ${theme.border}` }}>
+                            {[['ai-path', 'AI Learning Path'], ['classes', 'Enrolled Classes']].map(([key, label]) => (
+                                <button
+                                    key={key}
+                                    onClick={() => setActiveTab(key)}
+                                    style={{
+                                        padding: '8px 22px', borderRadius: '9px', fontWeight: 700, fontSize: '13.5px',
+                                        border: 'none', cursor: 'pointer', transition: 'all .18s',
+                                        background: activeTab === key ? aGrad : 'transparent',
+                                        color: activeTab === key ? '#fff' : theme.textMuted,
+                                        boxShadow: activeTab === key ? `0 2px 12px ${accent.from}35` : 'none',
+                                    }}
+                                >
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 </header>
 
-                <div className="flex-1 overflow-y-auto px-8 pb-8 scrollbar-thin scrollbar-thumb-gray-700">
+                {/* Content */}
+                <div style={{ flex: 1, overflowY: 'auto', padding: '28px 32px' }}>
+
+                    {/* AI Path Tab */}
                     {activeTab === 'ai-path' && (
-                        <motion.div
-                            initial={{ opacity: 0, x: 20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ duration: 0.3 }}
-                        >
-                            <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-                                <Brain className="text-purple-400" />
+                        <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.25 }}>
+                            <h2 style={{ fontSize: '16px', fontWeight: 700, color: theme.textPrimary, marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <Brain size={18} style={{ color: accent.from }} />
                                 Personalized AI Path
                             </h2>
+
                             {hasAIPath ? (
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
                                     <motion.div
-                                        initial={{ opacity: 0, y: 10 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        whileHover={{ y: -5 }}
-                                        className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden hover:border-purple-500 transition-all shadow-lg group cursor-pointer flex flex-col"
+                                        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} whileHover={{ y: -4 }}
+                                        style={{ background: theme.surface, borderRadius: '18px', border: `1px solid ${theme.border}`, overflow: 'hidden', boxShadow: `0 2px 16px rgba(0,0,0,0.18)`, cursor: 'pointer', display: 'flex', flexDirection: 'column', transition: 'border-color .18s' }}
+                                        onMouseEnter={e => e.currentTarget.style.borderColor = `${accent.from}60`}
+                                        onMouseLeave={e => e.currentTarget.style.borderColor = theme.border}
                                         onClick={() => navigate('/ai-path')}
                                     >
-                                        <div className="h-40 bg-gradient-to-br from-purple-900 to-indigo-900 relative p-6 flex flex-col justify-end">
-                                            <div className="absolute top-4 right-4 bg-black/40 backdrop-blur px-3 py-1 rounded-full text-xs font-bold border border-white/10 flex items-center gap-1">
-                                                <Brain size={12} className="text-purple-300" /> AI Generated
+                                        {/* Card hero */}
+                                        <div style={{ height: '148px', background: `linear-gradient(135deg,${accent.from}70,${accent.to}55)`, position: 'relative', padding: '20px', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                                            <div style={{ position: 'absolute', top: '14px', right: '14px', background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(6px)', padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700, border: '1px solid rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', gap: '4px', color: '#fff' }}>
+                                                <Brain size={11} /> AI Generated
                                             </div>
-                                            <h3 className="text-2xl font-bold text-white leading-tight">{aiProfile.onboarding?.field}</h3>
-                                            <p className="text-purple-200 text-sm font-medium">{aiProfile.onboarding?.level} Level</p>
+                                            <h3 style={{ fontSize: '22px', fontWeight: 800, color: '#fff', margin: 0, lineHeight: 1.2 }}>{aiProfile.onboarding?.field}</h3>
+                                            <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.75)', margin: '4px 0 0', fontWeight: 500 }}>{aiProfile.onboarding?.level} Level</p>
                                         </div>
 
-                                        <div className="p-6 flex-1 flex flex-col justify-between">
+                                        <div style={{ padding: '20px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                                             <div>
-                                                <div className="flex justify-between text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>
                                                     <span>Progress</span>
                                                     <span>{Math.round(aiProgress)}%</span>
                                                 </div>
-                                                <div className="h-2 bg-gray-700 rounded-full overflow-hidden mb-4">
-                                                    <div
-                                                        className="h-full bg-gradient-to-r from-purple-500 to-blue-500"
-                                                        style={{ width: `${aiProgress}%` }}
-                                                    ></div>
+                                                <div style={{ height: '6px', background: theme.surface2, borderRadius: '4px', overflow: 'hidden', marginBottom: '14px' }}>
+                                                    <div style={{ height: '100%', width: `${aiProgress}%`, background: aGrad, borderRadius: '4px', transition: 'width .6s ease' }} />
                                                 </div>
-                                                <p className="text-gray-400 text-sm mb-6">
-                                                    {aiProfile.currentPath.modules.length} Modules • Personalized Curriculum
+                                                <p style={{ fontSize: '13px', color: theme.textMuted, marginBottom: '16px' }}>
+                                                    {aiProfile.currentPath.modules.length} Modules · Personalized Curriculum
                                                 </p>
                                             </div>
-
                                             <button
-                                                className="w-full py-3 bg-gray-700 group-hover:bg-purple-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-colors mt-auto"
+                                                style={{ width: '100%', padding: '11px', background: theme.surface2, border: `1px solid ${theme.border}`, borderRadius: '10px', color: theme.textPrimary, fontWeight: 700, fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', transition: 'all .18s' }}
+                                                onMouseEnter={e => { e.currentTarget.style.background = aGrad; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = 'transparent'; }}
+                                                onMouseLeave={e => { e.currentTarget.style.background = theme.surface2; e.currentTarget.style.color = theme.textPrimary; e.currentTarget.style.borderColor = theme.border; }}
                                             >
-                                                Continue Path <ArrowRight size={16} />
+                                                Continue Path <ArrowRight size={15} />
                                             </button>
                                         </div>
                                     </motion.div>
                                 </div>
                             ) : (
-                                <div className="bg-gray-800/50 border border-dashed border-gray-700 rounded-xl p-8 flex flex-col items-center justify-center text-center">
-                                    <p className="text-gray-400 mb-4">You don't have an active AI Learning Path.</p>
+                                <div style={{ background: theme.surface, border: `1px dashed ${theme.border}`, borderRadius: '14px', padding: '48px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+                                    <p style={{ color: theme.textMuted, marginBottom: '16px', fontSize: '14px' }}>You don't have an active AI Learning Path.</p>
                                     <button
                                         onClick={() => navigate('/onboarding')}
-                                        className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg font-bold transition"
+                                        style={{ background: aGrad, color: '#fff', border: 'none', padding: '10px 24px', borderRadius: '10px', fontWeight: 700, cursor: 'pointer', fontSize: '14px', boxShadow: `0 4px 16px ${accent.from}35` }}
                                     >
                                         Create New Path
                                     </button>
@@ -144,18 +151,16 @@ const MyCourses = () => {
                         </motion.div>
                     )}
 
+                    {/* Classes Tab */}
                     {activeTab === 'classes' && (
-                        <motion.div
-                            initial={{ opacity: 0, x: 20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ duration: 0.3 }}
-                        >
-                            <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-                                <GraduationCap className="text-blue-400" />
+                        <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.25 }}>
+                            <h2 style={{ fontSize: '16px', fontWeight: 700, color: theme.textPrimary, marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <GraduationCap size={18} style={{ color: accent.from }} />
                                 Enrolled Classes
                             </h2>
+
                             {enrolledClasses.length > 0 ? (
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
                                     {enrolledClasses.map(course => {
                                         const completed = course.studentProgress?.completedTopics?.length || 0;
                                         const totalTopics = course.modules.reduce((acc, m) => acc + m.topics.length, 0);
@@ -164,41 +169,39 @@ const MyCourses = () => {
                                         return (
                                             <motion.div
                                                 key={course._id}
-                                                initial={{ opacity: 0, y: 10 }}
-                                                animate={{ opacity: 1, y: 0 }}
-                                                whileHover={{ y: -5 }}
-                                                className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden hover:border-blue-500 transition-all shadow-lg group cursor-pointer flex flex-col"
+                                                initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} whileHover={{ y: -4 }}
+                                                style={{ background: theme.surface, borderRadius: '18px', border: `1px solid ${theme.border}`, overflow: 'hidden', boxShadow: `0 2px 16px rgba(0,0,0,0.18)`, cursor: 'pointer', display: 'flex', flexDirection: 'column', transition: 'border-color .18s' }}
+                                                onMouseEnter={e => e.currentTarget.style.borderColor = `${accent.from}60`}
+                                                onMouseLeave={e => e.currentTarget.style.borderColor = theme.border}
                                                 onClick={() => navigate(`/class/${course._id}`)}
                                             >
-                                                <div className="h-40 bg-gradient-to-br from-gray-700 to-gray-800 relative p-6 flex flex-col justify-end">
-                                                    <div className="absolute top-4 right-4 bg-black/40 backdrop-blur px-3 py-1 rounded-full text-xs font-bold border border-white/10">
+                                                <div style={{ height: '148px', background: `linear-gradient(135deg,${theme.surface2},${theme.bg})`, position: 'relative', padding: '20px', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', borderBottom: `1px solid ${theme.border}` }}>
+                                                    <div style={{ position: 'absolute', top: '14px', right: '14px', background: 'rgba(0,0,0,0.25)', backdropFilter: 'blur(6px)', padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700, border: `1px solid ${theme.border}`, color: theme.textSecondary }}>
                                                         Teacher Led
                                                     </div>
-                                                    <h3 className="text-2xl font-bold text-white leading-tight truncate">{course.title}</h3>
-                                                    <p className="text-gray-300 text-sm font-medium">{course.level}</p>
+                                                    <h3 style={{ fontSize: '20px', fontWeight: 800, color: theme.textPrimary, margin: 0, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{course.title}</h3>
+                                                    <p style={{ fontSize: '13px', color: theme.textSecondary, margin: '4px 0 0', fontWeight: 500 }}>{course.level}</p>
                                                 </div>
 
-                                                <div className="p-6 flex-1 flex flex-col justify-between">
+                                                <div style={{ padding: '20px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                                                     <div>
-                                                        <div className="flex justify-between text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>
                                                             <span>Progress</span>
                                                             <span>{Math.round(progressPercent)}%</span>
                                                         </div>
-                                                        <div className="h-2 bg-gray-700 rounded-full overflow-hidden mb-4">
-                                                            <div
-                                                                className="h-full bg-gradient-to-r from-blue-500 to-cyan-500"
-                                                                style={{ width: `${progressPercent}%` }}
-                                                            ></div>
+                                                        <div style={{ height: '6px', background: theme.surface2, borderRadius: '4px', overflow: 'hidden', marginBottom: '14px' }}>
+                                                            <div style={{ height: '100%', width: `${progressPercent}%`, background: aGrad, borderRadius: '4px', transition: 'width .6s ease' }} />
                                                         </div>
-                                                        <p className="text-gray-400 text-sm mb-6 line-clamp-2 h-10">
+                                                        <p style={{ fontSize: '13px', color: theme.textMuted, marginBottom: '16px', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
                                                             {course.description}
                                                         </p>
                                                     </div>
-
                                                     <button
-                                                        className="w-full py-3 bg-gray-700 group-hover:bg-blue-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-colors mt-auto"
+                                                        style={{ width: '100%', padding: '11px', background: theme.surface2, border: `1px solid ${theme.border}`, borderRadius: '10px', color: theme.textPrimary, fontWeight: 700, fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', transition: 'all .18s' }}
+                                                        onMouseEnter={e => { e.currentTarget.style.background = aGrad; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = 'transparent'; }}
+                                                        onMouseLeave={e => { e.currentTarget.style.background = theme.surface2; e.currentTarget.style.color = theme.textPrimary; e.currentTarget.style.borderColor = theme.border; }}
                                                     >
-                                                        Go to Class <ArrowRight size={16} />
+                                                        Go to Class <ArrowRight size={15} />
                                                     </button>
                                                 </div>
                                             </motion.div>
@@ -206,9 +209,9 @@ const MyCourses = () => {
                                     })}
                                 </div>
                             ) : (
-                                <div className="bg-gray-800/50 border border-dashed border-gray-700 rounded-xl p-8 flex flex-col items-center justify-center text-center">
-                                    <p className="text-gray-400">You haven't enrolled in any classes yet.</p>
-                                    <p className="text-gray-500 text-sm mt-2">Ask your instructor for an invite.</p>
+                                <div style={{ background: theme.surface, border: `1px dashed ${theme.border}`, borderRadius: '14px', padding: '48px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+                                    <p style={{ color: theme.textMuted, marginBottom: '6px', fontSize: '14px' }}>You haven't enrolled in any classes yet.</p>
+                                    <p style={{ color: theme.textMuted, fontSize: '13px', opacity: 0.7 }}>Ask your instructor for an invite.</p>
                                 </div>
                             )}
                         </motion.div>

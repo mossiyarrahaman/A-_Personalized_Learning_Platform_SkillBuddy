@@ -1,41 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import { X, UserPlus, Trash2, Mail, RefreshCw, Check } from 'lucide-react';
 import api from '../api/axios';
+import { useAppTheme } from '../hooks/useAppTheme';
 
 const ManageStudentsModal = ({ course, onClose, onUpdate }) => {
+    const { theme, accent } = useAppTheme();
+    const aGrad = `linear-gradient(135deg,${accent.from},${accent.to})`;
+
     const [identifier, setIdentifier] = useState('');
     const [loading, setLoading] = useState(false);
     const [studentsData, setStudentsData] = useState([]);
     const [availableStudents, setAvailableStudents] = useState([]);
     const [refreshing, setRefreshing] = useState(false);
-    const [loadingId, setLoadingId] = useState(null); // Track which student is being added
+    const [loadingId, setLoadingId] = useState(null);
     const [selectedStudents, setSelectedStudents] = useState(new Set());
     const [bulkLoading, setBulkLoading] = useState(false);
 
-    // Fetch detailed student progress when modal opens
     const fetchStudentProgress = async () => {
         try {
             const response = await api.get(`/courses/${course._id}/analytics`);
-            if (response.data.students) {
-                setStudentsData(response.data.students);
-            }
+            if (response.data.students) setStudentsData(response.data.students);
         } catch (error) {
-            console.error("Failed to fetch student progress", error);
+            console.error('Failed to fetch student progress', error);
         }
     };
 
-    // Fetch available students for the list
     const fetchAvailableStudents = async () => {
         setRefreshing(true);
         try {
             const response = await api.get('/auth/students');
-            // Filter out already enrolled students
             const allStudents = response.data.students || [];
-            // Simple shuffle to show random 10 if list is long
             const shuffled = allStudents.sort(() => 0.5 - Math.random());
             setAvailableStudents(shuffled.slice(0, 10));
         } catch (error) {
-            console.error("Failed to fetch available students", error);
+            console.error('Failed to fetch available students', error);
         } finally {
             setRefreshing(false);
         }
@@ -49,24 +47,15 @@ const ManageStudentsModal = ({ course, onClose, onUpdate }) => {
     const handleAddStudent = async (e, specificEmail = null) => {
         if (e) e.preventDefault();
         const emailToAdd = specificEmail || identifier;
-
         if (!emailToAdd) return;
-
         if (specificEmail) setLoadingId(specificEmail);
         else setLoading(true);
-
         try {
             await api.post(`/courses/${course._id}/enroll`, { identifier: emailToAdd });
-
-            if (!specificEmail) {
-                alert('Student added successfully');
-                setIdentifier('');
-            }
-
-            onUpdate(); // Trigger refresh of course data
-            fetchStudentProgress(); // Refresh enrolled list
-            fetchAvailableStudents(); // Refresh available list (remove added one?)
-
+            if (!specificEmail) { alert('Student added successfully'); setIdentifier(''); }
+            onUpdate();
+            fetchStudentProgress();
+            fetchAvailableStudents();
         } catch (error) {
             alert(error.response?.data?.error || 'Failed to add student');
         } finally {
@@ -77,34 +66,26 @@ const ManageStudentsModal = ({ course, onClose, onUpdate }) => {
 
     const toggleSelection = (email) => {
         const newSelection = new Set(selectedStudents);
-        if (newSelection.has(email)) {
-            newSelection.delete(email);
-        } else {
-            newSelection.add(email);
-        }
+        if (newSelection.has(email)) newSelection.delete(email);
+        else newSelection.add(email);
         setSelectedStudents(newSelection);
     };
 
     const handleBulkAdd = async () => {
         if (selectedStudents.size === 0) return;
-
         setBulkLoading(true);
         try {
             const identifiers = Array.from(selectedStudents);
             const response = await api.post(`/courses/${course._id}/enroll`, { identifiers });
-
             const { results } = response.data;
             let msg = `Added ${results.added.length} students.`;
             if (results.failed.length > 0) msg += ` Failed: ${results.failed.length}.`;
             if (results.alreadyEnrolled.length > 0) msg += ` Already in: ${results.alreadyEnrolled.length}.`;
-
             alert(msg);
-
             setSelectedStudents(new Set());
             onUpdate();
             fetchStudentProgress();
             fetchAvailableStudents();
-
         } catch (error) {
             alert(error.response?.data?.error || 'Failed to add students');
         } finally {
@@ -112,169 +93,168 @@ const ManageStudentsModal = ({ course, onClose, onUpdate }) => {
         }
     };
 
-    // Helper to check if student is already enrolled
-    const isEnrolled = (email) => {
-        return studentsData.some(s => s.email === email);
-    };
+    const isEnrolled = (email) => studentsData.some(s => s.email === email);
+
+    const labelStyle = { display: 'block', fontSize: '10px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '12px' };
 
     return (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in zoom-in duration-200">
-            <div className="bg-gray-800 rounded-2xl w-full max-w-4xl border border-gray-700 shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[90vh]">
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.80)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', zIndex: 50 }}>
+            <div style={{ background: theme.surface, borderRadius: '20px', width: '100%', maxWidth: '860px', border: `1px solid ${theme.border}`, boxShadow: `0 0 60px ${accent.glow}`, overflow: 'hidden', display: 'flex', flexDirection: 'row', maxHeight: '90vh', fontFamily: "'DM Sans', sans-serif" }}>
 
-                {/* LEFT SIDE: Active Students */}
-                <div className="flex-1 border-r border-gray-700 flex flex-col min-w-0">
-                    <div className="p-6 border-b border-gray-700 bg-gray-900/50">
-                        <h3 className="text-xl font-bold text-white">Enrolled Students</h3>
-                        <p className="text-sm text-gray-400">{course.title} • {studentsData.length} Students</p>
+                {/* LEFT — Enrolled Students */}
+                <div style={{ flex: 1, borderRight: `1px solid ${theme.border}`, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                    <div style={{ padding: '20px 22px', borderBottom: `1px solid ${theme.border}`, background: `${theme.bg}80` }}>
+                        <h3 style={{ fontSize: '15px', fontWeight: 700, color: theme.textPrimary, margin: '0 0 3px', fontFamily: "'Sora', sans-serif" }}>Enrolled Students</h3>
+                        <p style={{ fontSize: '12px', color: theme.textMuted, margin: 0 }}>{course.title} · {studentsData.length} students</p>
                     </div>
-
-                    <div className="p-4 overflow-y-auto custom-scrollbar flex-1">
+                    <div style={{ padding: '14px', overflowY: 'auto', flex: 1 }}>
                         {studentsData.length > 0 ? (
-                            <div className="space-y-3">
-                                {studentsData.map((student) => (
-                                    <div key={student.studentId || student._id} className="flex items-center justify-between p-3 bg-gray-700/30 rounded-lg border border-gray-700">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center text-purple-400 font-bold text-xs border border-purple-500/30">
-                                                {student.name ? student.name[0] : 'S'}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {studentsData.map(student => (
+                                    <div key={student.studentId || student._id}
+                                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: theme.bg, borderRadius: '10px', border: `1px solid ${theme.border}` }}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                            <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: `${accent.from}18`, border: `1px solid ${accent.from}35`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700, color: accent.from, flexShrink: 0 }}>
+                                                {student.name ? student.name[0].toUpperCase() : 'S'}
                                             </div>
                                             <div>
-                                                <div className="text-sm font-bold text-white max-w-[120px] truncate">{student.name || 'Unknown'}</div>
-                                                <div className="text-xs text-gray-400 max-w-[120px] truncate">{student.email}</div>
+                                                <div style={{ fontSize: '13px', fontWeight: 600, color: theme.textPrimary, maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{student.name || 'Unknown'}</div>
+                                                <div style={{ fontSize: '11px', color: theme.textMuted, maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{student.email}</div>
                                             </div>
                                         </div>
-                                        <div className="flex items-center gap-2">
-                                            <div className="text-right">
-                                                <div className="text-xs font-medium text-green-400">{student.percentage || 0}%</div>
-                                                <div className="w-16 h-1 bg-gray-700 rounded-full mt-1">
-                                                    <div className="h-full bg-green-500 rounded-full" style={{ width: `${student.percentage || 0}%` }}></div>
-                                                </div>
+                                        <div style={{ textAlign: 'right' }}>
+                                            <div style={{ fontSize: '12px', fontWeight: 700, color: '#22c55e' }}>{student.percentage || 0}%</div>
+                                            <div style={{ width: '60px', height: '3px', background: theme.border, borderRadius: '3px', marginTop: '4px', overflow: 'hidden' }}>
+                                                <div style={{ height: '100%', width: `${student.percentage || 0}%`, background: '#22c55e', borderRadius: '3px' }} />
                                             </div>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         ) : (
-                            <div className="text-center py-10 text-gray-500 border border-dashed border-gray-700 rounded-xl m-2">
+                            <div style={{ textAlign: 'center', padding: '40px 20px', color: theme.textMuted, fontSize: '13px', border: `1px dashed ${theme.border}`, borderRadius: '12px', margin: '8px' }}>
                                 No students enrolled yet.
                             </div>
                         )}
                     </div>
                 </div>
 
-                {/* RIGHT SIDE: Add Students */}
-                <div className="flex-1 flex flex-col min-w-0 bg-gray-800">
-                    <div className="p-6 border-b border-gray-700 flex justify-between items-center bg-gray-900/30">
+                {/* RIGHT — Add Students */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                    <div style={{ padding: '20px 22px', borderBottom: `1px solid ${theme.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: `${theme.bg}50` }}>
                         <div>
-                            <h3 className="text-lg font-bold text-white">Add Students</h3>
-                            <p className="text-sm text-gray-400">Invite new learners</p>
+                            <h3 style={{ fontSize: '15px', fontWeight: 700, color: theme.textPrimary, margin: '0 0 3px', fontFamily: "'Sora', sans-serif" }}>Add Students</h3>
+                            <p style={{ fontSize: '12px', color: theme.textMuted, margin: 0 }}>Invite new learners</p>
                         </div>
-                        <button onClick={onClose} className="text-gray-400 hover:text-white transition">
-                            <X className="w-6 h-6" />
-                        </button>
+                        <button onClick={onClose}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: theme.textMuted, display: 'flex', padding: '4px', borderRadius: '6px' }}
+                            onMouseEnter={e => e.currentTarget.style.color = theme.textPrimary}
+                            onMouseLeave={e => e.currentTarget.style.color = theme.textMuted}
+                        ><X size={18} /></button>
                     </div>
 
-                    <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
+                    <div style={{ padding: '20px 22px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '24px' }}>
                         {/* Manual Search */}
-                        <form onSubmit={(e) => handleAddStudent(e)} className="mb-8">
-                            <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Add by Email/Username</label>
-                            <div className="flex gap-2">
-                                <div className="relative flex-1">
-                                    <Mail className="absolute left-3 top-3 text-gray-500 w-5 h-5" />
+                        <form onSubmit={handleAddStudent}>
+                            <label style={labelStyle}>Add by Email / Username</label>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <div style={{ position: 'relative', flex: 1 }}>
+                                    <Mail size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: theme.textMuted, pointerEvents: 'none' }} />
                                     <input
                                         type="text"
                                         value={identifier}
-                                        onChange={(e) => setIdentifier(e.target.value)}
+                                        onChange={e => setIdentifier(e.target.value)}
                                         placeholder="email@example.com"
-                                        className="w-full bg-gray-900 border border-gray-600 rounded-xl pl-10 pr-4 py-2.5 text-white focus:ring-2 focus:ring-purple-500 outline-none text-sm"
+                                        style={{ width: '100%', background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '10px', paddingLeft: '36px', paddingRight: '12px', paddingTop: '10px', paddingBottom: '10px', color: theme.textPrimary, fontSize: '13px', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' }}
+                                        onFocus={e => e.target.style.borderColor = accent.from}
+                                        onBlur={e => e.target.style.borderColor = theme.border}
                                     />
                                 </div>
-                                <button
-                                    type="submit"
-                                    disabled={loading || !identifier}
-                                    className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-xl font-bold transition flex items-center gap-2 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                                <button type="submit" disabled={loading || !identifier}
+                                    style={{ background: aGrad, border: 'none', borderRadius: '10px', padding: '0 16px', color: '#fff', cursor: loading || !identifier ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', opacity: loading || !identifier ? 0.5 : 1, boxShadow: `0 4px 12px ${accent.glow}` }}
                                 >
-                                    {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                                    {loading ? <RefreshCw size={15} className="animate-spin" /> : <UserPlus size={15} />}
                                 </button>
                             </div>
                         </form>
 
-                        {/* Quick Add List with Bulk Selection */}
+                        {/* Quick Add List */}
                         <div>
-                            <div className="flex justify-between items-center mb-4">
-                                <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest">Quick Add (Suggestions)</label>
-                                <div className="flex gap-3">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                <label style={{ ...labelStyle, marginBottom: 0 }}>Quick Add (Suggestions)</label>
+                                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                                     {selectedStudents.size > 0 && (
-                                        <button
-                                            onClick={handleBulkAdd}
-                                            disabled={bulkLoading}
-                                            className="text-xs bg-purple-600 hover:bg-purple-500 text-white px-3 py-1 rounded-lg font-bold transition flex items-center gap-1 shadow-lg disabled:opacity-50"
+                                        <button onClick={handleBulkAdd} disabled={bulkLoading}
+                                            style={{ fontSize: '12px', background: aGrad, border: 'none', borderRadius: '8px', padding: '5px 12px', color: '#fff', cursor: 'pointer', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '5px', opacity: bulkLoading ? 0.6 : 1 }}
                                         >
-                                            {bulkLoading ? <RefreshCw className="w-3 h-3 animate-spin" /> : <UserPlus className="w-3 h-3" />}
+                                            {bulkLoading ? <RefreshCw size={11} className="animate-spin" /> : <UserPlus size={11} />}
                                             Add Selected ({selectedStudents.size})
                                         </button>
                                     )}
-                                    <button
-                                        onClick={fetchAvailableStudents}
-                                        disabled={refreshing}
-                                        className="text-xs flex items-center gap-1 text-purple-400 hover:text-purple-300 transition"
+                                    <button onClick={fetchAvailableStudents} disabled={refreshing}
+                                        style={{ fontSize: '12px', background: 'none', border: 'none', cursor: 'pointer', color: accent.from, display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}
                                     >
-                                        <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} /> Refresh Lists
+                                        <RefreshCw size={11} className={refreshing ? 'animate-spin' : ''} /> Refresh
                                     </button>
                                 </div>
                             </div>
 
-                            <div className="space-y-2">
-                                {availableStudents.map((student) => {
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+                                {availableStudents.map(student => {
                                     const alreadyEnrolled = isEnrolled(student.email);
                                     const isSelected = selectedStudents.has(student.email);
-                                    const isadding = loadingId === student.email;
+                                    const isAdding = loadingId === student.email;
 
                                     return (
-                                        <div
-                                            key={student._id}
-                                            className={`flex items-center justify-between p-3 rounded-lg border transition group cursor-pointer ${isSelected ? 'bg-purple-900/20 border-purple-500/50' : 'bg-gray-900/40 border-gray-700/50 hover:border-gray-600'}`}
+                                        <div key={student._id}
                                             onClick={() => !alreadyEnrolled && toggleSelection(student.email)}
+                                            style={{
+                                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                                padding: '10px 12px', borderRadius: '10px',
+                                                border: `1px solid ${isSelected ? `${accent.from}50` : theme.border}`,
+                                                background: isSelected ? `${accent.from}10` : theme.bg,
+                                                cursor: alreadyEnrolled ? 'default' : 'pointer',
+                                                transition: 'all .15s',
+                                            }}
+                                            onMouseEnter={e => { if (!alreadyEnrolled && !isSelected) e.currentTarget.style.borderColor = `${accent.from}30`; }}
+                                            onMouseLeave={e => { if (!alreadyEnrolled && !isSelected) e.currentTarget.style.borderColor = theme.border; }}
                                         >
-                                            <div className="flex items-center gap-3 min-w-0">
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
                                                 {!alreadyEnrolled && (
-                                                    <div className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${isSelected ? 'bg-purple-500 border-purple-500' : 'border-gray-600 bg-gray-800'}`}>
-                                                        {isSelected && <Check className="w-3 h-3 text-white" />}
+                                                    <div style={{ width: '18px', height: '18px', borderRadius: '4px', border: `2px solid ${isSelected ? accent.from : theme.border}`, background: isSelected ? accent.from : 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all .15s' }}>
+                                                        {isSelected && <Check size={11} style={{ color: '#fff' }} />}
                                                     </div>
                                                 )}
-
-                                                <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold text-xs border border-blue-500/30 flex-shrink-0">
-                                                    {student.name ? student.name[0] : 'U'}
+                                                <div style={{ width: '30px', height: '30px', borderRadius: '50%', background: theme.surface, border: `1px solid ${theme.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700, color: theme.textSecondary, flexShrink: 0 }}>
+                                                    {student.name ? student.name[0].toUpperCase() : 'U'}
                                                 </div>
-                                                <div className="min-w-0 select-none">
-                                                    <div className="text-sm font-medium text-gray-200 truncate">{student.name}</div>
-                                                    <div className="text-xs text-gray-500 truncate">{student.email}</div>
+                                                <div style={{ minWidth: 0 }}>
+                                                    <div style={{ fontSize: '13px', fontWeight: 500, color: theme.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{student.name}</div>
+                                                    <div style={{ fontSize: '11px', color: theme.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{student.email}</div>
                                                 </div>
                                             </div>
 
                                             {alreadyEnrolled ? (
-                                                <span className="text-xs text-green-500 font-medium px-3 py-1 bg-green-500/10 rounded-full flex items-center gap-1">
-                                                    <Check className="w-3 h-3" /> Added
+                                                <span style={{ fontSize: '11px', fontWeight: 700, color: '#22c55e', background: 'rgba(34,197,94,0.10)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: '20px', padding: '3px 10px', display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                                                    <Check size={10} /> Added
                                                 </span>
                                             ) : (
                                                 <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleAddStudent(null, student.email);
-                                                    }}
-                                                    className="opacity-0 group-hover:opacity-100 bg-gray-700 hover:bg-purple-600 text-white p-2 rounded-lg transition-all shadow-md disabled:opacity-50"
-                                                    title="Add this student"
-                                                    disabled={isadding}
+                                                    onClick={e => { e.stopPropagation(); handleAddStudent(null, student.email); }}
+                                                    disabled={isAdding}
+                                                    style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '5px 8px', cursor: 'pointer', color: theme.textMuted, display: 'flex', flexShrink: 0 }}
+                                                    onMouseEnter={e => { e.currentTarget.style.background = aGrad; e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.color = '#fff'; }}
+                                                    onMouseLeave={e => { e.currentTarget.style.background = theme.surface; e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.color = theme.textMuted; }}
                                                 >
-                                                    {isadding ? <RefreshCw className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                                                    {isAdding ? <RefreshCw size={13} className="animate-spin" /> : <UserPlus size={13} />}
                                                 </button>
                                             )}
                                         </div>
                                     );
                                 })}
                                 {availableStudents.length === 0 && (
-                                    <div className="text-center text-sm text-gray-500 py-4">
-                                        No suggestions available.
-                                    </div>
+                                    <div style={{ textAlign: 'center', fontSize: '13px', color: theme.textMuted, padding: '20px' }}>No suggestions available.</div>
                                 )}
                             </div>
                         </div>

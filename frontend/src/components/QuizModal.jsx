@@ -7,7 +7,14 @@ import api from '../api/axios';
 import { useAppTheme } from '../hooks/useAppTheme';
 import { saveQuizResult } from '../utils/quizStorage';
 
-const DIFFICULTIES = ['Easy', 'Intermediate', 'Hard'];
+const BLOOM_LEVELS = [
+    { key: 'remember',   label: 'Remember',   desc: 'Recall facts & definitions' },
+    { key: 'understand', label: 'Understand',  desc: 'Explain in own words' },
+    { key: 'apply',      label: 'Apply',       desc: 'Solve problems with code' },
+    { key: 'analyze',    label: 'Analyze',     desc: 'Compare & break down' },
+    { key: 'evaluate',   label: 'Evaluate',    desc: 'Judge & justify choices' },
+    { key: 'create',     label: 'Create',      desc: 'Design & build solutions' },
+];
 const fmt = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
 const QuizModal = ({
@@ -19,11 +26,10 @@ const QuizModal = ({
 }) => {
     const { theme, accent } = useAppTheme();
     const aGrad = `linear-gradient(135deg,${accent.from},${accent.to})`;
-    const panelBg = theme.bg === '#f5f4ff' ? '#ffffff' : '#13102a';
 
     // Stage: config | loading | active | results
     const [stage, setStage] = useState('config');
-    const [difficulty, setDiff] = useState(initDiff);
+    const [bloomLevel, setBloomLevel] = useState('understand');
     const [numQs, setNumQs] = useState(5);
     const [questions, setQuestions] = useState([]);
     const [current, setCurrent] = useState(0);
@@ -37,8 +43,8 @@ const QuizModal = ({
     const answersRef = useRef({});
     const questionsRef = useRef([]);
     const startRef = useRef(null);
-    const diffRef = useRef(difficulty);
-    diffRef.current = difficulty;
+    const bloomRef = useRef(bloomLevel);
+    bloomRef.current = bloomLevel;
 
     // Sync answers ref
     useEffect(() => { answersRef.current = answers; }, [answers]);
@@ -54,7 +60,7 @@ const QuizModal = ({
                 if (prev <= 1) {
                     clearInterval(id);
                     // Use refs to avoid stale closure
-                    submitQuiz(answersRef.current, questionsRef.current, startRef.current, diffRef.current);
+                    submitQuiz(answersRef.current, questionsRef.current, startRef.current, bloomRef.current);
                     return 0;
                 }
                 return prev - 1;
@@ -73,7 +79,12 @@ const QuizModal = ({
 
         try {
             const res = await api.post('/ai-assistant/generate-topic-quiz', {
-                topicTitle, difficulty, numQuestions: numQs, includeExplanations: true,
+                topicTitle,
+                bloomLevel,
+                numQuestions: numQs,
+                ...(courseId && { courseId }),
+                ...(moduleId && { moduleId }),
+                ...(topicId && { topicId }),
             });
             const qs = res.data.questions || [];
             if (!qs.length) throw new Error('No questions');
@@ -100,12 +111,12 @@ const QuizModal = ({
         if (current + 1 < questions.length) {
             setCurrent(c => c + 1);
         } else {
-            submitQuiz(answersRef.current, questionsRef.current, startRef.current, diffRef.current);
+            submitQuiz(answersRef.current, questionsRef.current, startRef.current, bloomRef.current);
         }
     };
 
     // Core submit — uses passed params (not state) to avoid stale closures
-    const submitQuiz = (finalAnswers, qs, startTime, diff) => {
+    const submitQuiz = (finalAnswers, qs, startTime, bloom) => {
         if (!qs || qs.length === 0) return;
 
         const taken = startTime ? Math.round((Date.now() - startTime) / 1000) : 0;
@@ -137,7 +148,7 @@ const QuizModal = ({
             score: correct,
             total: qs.length,
             pct,
-            difficulty: diff,
+            bloomLevel: bloom,
             timeTaken: taken,
             mistakes,
             completedAt: new Date().toISOString(),
@@ -166,6 +177,7 @@ const QuizModal = ({
 
     const reset = () => {
         setStage('config');
+        setBloomLevel('understand');
         setQuestions([]);
         setAnswers({});
         answersRef.current = {};
@@ -178,7 +190,7 @@ const QuizModal = ({
 
     return (
         <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
-            <div onClick={e => e.stopPropagation()} style={{ background: panelBg, border: `1px solid ${theme.border}`, borderRadius: '20px', width: '100%', maxWidth: '620px', maxHeight: '92vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: `0 0 60px ${accent.glow}` }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '20px', width: '100%', maxWidth: '620px', maxHeight: '92vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: `0 0 60px ${accent.glow}` }}>
                 <style>{`
                     @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=DM+Sans:wght@400;500;600&display=swap');
                     @keyframes spin{to{transform:rotate(360deg)}}
@@ -201,11 +213,19 @@ const QuizModal = ({
 
                     <div style={{ padding: '22px', overflowY: 'auto' }}>
                         <div style={{ marginBottom: '20px' }}>
-                            <div style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>Difficulty</div>
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                                {DIFFICULTIES.map(d => (
-                                    <button key={d} onClick={() => setDiff(d)} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: `2px solid ${difficulty === d ? accent.from : theme.border}`, background: difficulty === d ? `${accent.from}15` : 'none', color: difficulty === d ? accent.from : theme.textSecondary, fontWeight: 600, fontSize: '13px', cursor: 'pointer', transition: 'all .2s', fontFamily: "'DM Sans',sans-serif" }}>{d}</button>
-                                ))}
+                            <div style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>
+                                Bloom's Level
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '7px' }}>
+                                {BLOOM_LEVELS.map(b => {
+                                    const active = bloomLevel === b.key;
+                                    return (
+                                        <button key={b.key} onClick={() => setBloomLevel(b.key)} style={{ padding: '9px 6px', borderRadius: '10px', border: `2px solid ${active ? accent.from : theme.border}`, background: active ? `${accent.from}18` : 'none', color: active ? accent.from : theme.textSecondary, fontWeight: 600, fontSize: '12px', cursor: 'pointer', transition: 'all .2s', fontFamily: "'DM Sans',sans-serif", textAlign: 'center', lineHeight: 1.3 }}>
+                                            {b.label}
+                                            <div style={{ fontSize: '10px', fontWeight: 400, opacity: 0.75, marginTop: '2px', color: active ? accent.from : theme.textMuted }}>{b.desc}</div>
+                                        </button>
+                                    );
+                                })}
                             </div>
                         </div>
 
@@ -235,7 +255,7 @@ const QuizModal = ({
                     <div style={{ padding: '4rem', textAlign: 'center', color: theme.textPrimary }}>
                         <div style={{ width: '48px', height: '48px', border: `3px solid ${accent.from}`, borderTopColor: 'transparent', borderRadius: '50%', margin: '0 auto 16px', animation: 'spin .8s linear infinite' }} />
                         <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 700, fontSize: '16px', marginBottom: '6px' }}>Generating Quiz…</div>
-                        <div style={{ fontSize: '13px', color: theme.textMuted }}>AI crafting {numQs} {difficulty} questions on <em>{topicTitle}</em></div>
+                        <div style={{ fontSize: '13px', color: theme.textMuted }}>AI crafting {numQs} questions · {BLOOM_LEVELS.find(b => b.key === bloomLevel)?.label} level · <em>{topicTitle}</em></div>
                     </div>
                 )}
 
@@ -258,7 +278,7 @@ const QuizModal = ({
 
                     <div style={{ padding: '22px', overflowY: 'auto', flex: 1 }}>
                         <div style={{ display: 'inline-block', background: `${accent.from}18`, border: `1px solid ${accent.from}35`, borderRadius: '20px', padding: '3px 10px', fontSize: '11px', fontWeight: 600, color: accent.from, marginBottom: '14px' }}>
-                            {difficulty} · {topicTitle}
+                            {BLOOM_LEVELS.find(b => b.key === bloomLevel)?.label} · {topicTitle}
                         </div>
                         <div style={{ fontFamily: "'Sora',sans-serif", fontSize: '16px', fontWeight: 700, color: theme.textPrimary, lineHeight: 1.55, marginBottom: '18px' }}>
                             {questions[current].question}

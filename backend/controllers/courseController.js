@@ -3,6 +3,7 @@ const StudentProfile = require('../models/StudentProfile');
 const Progress = require('../models/Progress');
 const User = require('../models/User'); // Added User model
 const aiService = require('../services/ai-service');
+const { retrieveRelevantChunks } = require('../services/retrievalService');
 
 // ============================================================================
 // REPLACE ONLY the generatePath function in courseController.js
@@ -35,6 +36,9 @@ exports.generatePath = async (req, res) => {
                     title: m.title,
                     description: m.description,
                     duration: m.duration,
+                    difficultyLevel: m.difficultyLevel || 'beginner',
+                    goalStatement: m.goalStatement || '',
+                    practiceProjects: Array.isArray(m.practiceProjects) ? m.practiceProjects : [],
                     status: 'locked',
                     topics: (m.topics || []).map((t, tIdx) => ({
                         id: Math.random().toString(36).substr(2, 9),
@@ -89,11 +93,16 @@ exports.toggleTopicComplete = async (req, res) => {
         // Update status
         topicDoc.status = status;
 
-        // Check module completion (optional, but good for UI)
+        // Check module completion and unlock next module
         if (moduleDoc.topics.every(t => t.status === 'completed')) {
             moduleDoc.status = 'completed';
+            const mIdx = profile.currentPath.modules.findIndex(m => m.id === moduleId || m._id.toString() === moduleId);
+            if (mIdx >= 0 && mIdx < profile.currentPath.modules.length - 1) {
+                profile.currentPath.modules[mIdx + 1].status = 'unlocked';
+            }
         }
 
+        profile.markModified('currentPath');
         await profile.save();
         res.json({ success: true, topic: topicDoc });
 
@@ -121,6 +130,7 @@ exports.toggleStepComplete = async (req, res) => {
         if (!step) return res.status(404).json({ error: 'Step not found' });
 
         step.completed = completed;
+        profile.markModified('currentPath');
         await profile.save();
         res.json({ success: true });
     } catch (error) {
@@ -168,6 +178,22 @@ exports.getStudentDashboard = async (req, res) => {
         const userId = req.user.id;
         const profile = await StudentProfile.findOne({ userId });
         if (!profile) return res.status(404).json({ error: 'Profile not found' });
+
+        // Auto-heal: unlock modules whose predecessor is completed but they're still locked
+        if (profile.currentPath?.modules?.length > 1) {
+            let changed = false;
+            const mods = profile.currentPath.modules;
+            for (let i = 0; i < mods.length - 1; i++) {
+                if (mods[i].status === 'completed' && mods[i + 1].status === 'locked') {
+                    mods[i + 1].status = 'unlocked';
+                    changed = true;
+                }
+            }
+            if (changed) {
+                profile.markModified('currentPath');
+                await profile.save();
+            }
+        }
 
         res.json({ profile });
     } catch (error) {
@@ -237,6 +263,7 @@ exports.getTopicDetails = async (req, res) => {
                     steps: planData.steps
                 };
 
+                profile.markModified('currentPath');
                 await profile.save();
                 topicDoc = topicToUpdate;
             }
@@ -295,6 +322,7 @@ exports.updateResourceProgress = async (req, res) => {
                     }
                 }
             }
+            profile.markModified('currentPath');
             await profile.save();
         }
 
@@ -755,6 +783,105 @@ exports.getTopicAnalytics = async (req, res) => {
     }
 };
 
+exports.refreshTopicPlan = async (req, res) => {
+    try {
+        const { moduleId, topicId } = req.body;
+        const userId = req.user.id;
+
+        const profile = await StudentProfile.findOne({ userId });
+        if (!profile) return res.status(404).json({ error: 'Profile not found' });
+
+        const moduleDoc = profile.currentPath.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
+        if (!moduleDoc) return res.status(404).json({ error: 'Module not found' });
+
+        const topicDoc = moduleDoc.topics.find(t => t.id === topicId || t._id.toString() === topicId);
+        if (!topicDoc) return res.status(404).json({ error: 'Topic not found' });
+
+        // Clear cached plan so getTopicDetails regenerates it
+        topicDoc.plan = { objectives: [], estimatedTime: '', generatedAt: null, steps: [] };
+        await profile.save();
+
+        // Immediately regenerate the plan
+        const planData = await aiService.generateTopicStepPlan(
+            profile.onboarding.field,
+            profile.onboarding.level,
+            topicDoc.title,
+            moduleDoc.title,
+            topicDoc.subtopics || []
+        );
+
+        topicDoc.plan = {
+            objectives: planData.objectives,
+            estimatedTime: planData.estimatedTime,
+            generatedAt: new Date(),
+            steps: planData.steps
+        };
+
+        profile.markModified('currentPath');
+        await profile.save();
+        res.json({ success: true, topic: topicDoc });
+
+    } catch (error) {
+        console.error('Error refreshing topic plan:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+exports.submitAiPathQuiz = async (req, res) => {
+    try {
+        const { moduleId, topicId, topicTitle, score, totalQuestions, correctAnswers } = req.body;
+        const userId = req.user.id;
+        const passed = score >= 70;
+
+        const profile = await StudentProfile.findOne({ userId });
+        if (!profile) return res.status(404).json({ error: 'Profile not found' });
+
+        // Update stats
+        profile.stats.quizzesTaken = (profile.stats.quizzesTaken || 0) + 1;
+        const prevAvg = profile.stats.avgScore || 0;
+        const totalQ = profile.stats.quizzesTaken;
+        profile.stats.avgScore = Math.round(((prevAvg * (totalQ - 1)) + score) / totalQ);
+
+        if (passed) {
+            profile.points = (profile.points || 0) + 50;
+            profile.lastActiveDate = Date.now();
+
+            if (profile.stats.quizzesTaken === 1) {
+                profile.badges.push({ id: 'first_quiz', name: 'First Quiz Ace', icon: '🎯', awardedAt: new Date() });
+            }
+            if (score === 100) {
+                profile.badges.push({ id: 'perfect_score', name: 'Perfectionist', icon: '🌟', awardedAt: new Date() });
+            }
+
+            // Mark topic completed
+            const moduleDoc = profile.currentPath.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
+            if (moduleDoc) {
+                const topicDoc = moduleDoc.topics.find(t => t.id === topicId || t._id.toString() === topicId);
+                if (topicDoc) {
+                    topicDoc.status = 'completed';
+                    // Complete module if all topics done
+                    if (moduleDoc.topics.every(t => t.status === 'completed')) {
+                        moduleDoc.status = 'completed';
+                        // Unlock next module
+                        const mIdx = profile.currentPath.modules.findIndex(m => m.id === moduleId || m._id.toString() === moduleId);
+                        if (mIdx >= 0 && mIdx < profile.currentPath.modules.length - 1) {
+                            profile.currentPath.modules[mIdx + 1].status = 'unlocked';
+                        }
+                    }
+                }
+            }
+        }
+
+        profile.markModified('currentPath');
+        await profile.save();
+        res.json({ success: true, passed, points: profile.points, stats: profile.stats });
+
+    } catch (error) {
+        console.error('Error submitting AI path quiz:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
 exports.generateResourceQuiz = async (req, res) => {
     try {
         const { resourceTitle, topicTitle } = req.body;
@@ -791,19 +918,35 @@ exports.adminTopicQuiz = async (req, res) => {
         const topicDoc = moduleDoc.topics.id(topicId);
         if (!topicDoc) return res.status(404).json({ error: 'Topic not found' });
 
-        // Check if quiz already exists for this topic/bloom combo
-        // For simplicity, we can just generate a new one or retrieve last one
-        // We'll generate fresh if requested, or cache it. Given the requirement "Generate AI-based quizzes", let's generate on demand but maybe save to TopicQuiz model for logging.
-
-        // Actually, Step 2 says "Generate ONLY topic name...".
         console.log(`Generating Topic Quiz: ${topicDoc.title} (${course.title}) [${bloomLevel}]`);
+
+        // Retrieve relevant RAG context chunks for this topic
+        let ragContext = '';
+        try {
+            const chunks = await retrieveRelevantChunks({
+                query: `${topicDoc.title} ${moduleDoc.title}`,
+                courseId: courseId,
+                topK: 8
+            });
+            if (chunks.length > 0) {
+                ragContext = chunks.map(c => c.text).join('\n\n');
+                console.log(`RAG: retrieved ${chunks.length} chunks for quiz context`);
+            }
+        } catch (ragErr) {
+            console.warn('RAG retrieval failed, falling back to description:', ragErr.message);
+        }
+
+        // Build context: prefer RAG chunks, fall back to description
+        const contextText = ragContext || topicDoc.description || '';
 
         const questions = await aiService.generateTopicQuiz(
             topicDoc.title,
+            moduleDoc.title,
             course.title,
+            course.field || course.title,
             course.level || 'Intermediate',
             bloomLevel || 'understand',
-            topicDoc.description || ''
+            contextText
         );
 
         // Optional: Save to TopicQuiz model if we want to build a bank

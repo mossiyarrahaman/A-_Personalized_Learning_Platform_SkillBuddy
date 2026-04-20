@@ -1,19 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, ChevronLeft, Loader } from 'lucide-react';
+import { BookOpen, ChevronLeft, Loader, Brain } from 'lucide-react';
 import api from '../api/axios';
 import RoadmapTree from '../components/RoadmapTree';
 import TopicDetailModal from '../components/TopicDetailModal';
+import { useAppTheme } from '../hooks/useAppTheme';
 
 const AIPathCurriculum = () => {
     const navigate = useNavigate();
+    const { theme, accent } = useAppTheme();
+    const aGrad = `linear-gradient(135deg,${accent.from},${accent.to})`;
+
     const [aiProfile, setAiProfile] = useState(null);
     const [loading, setLoading] = useState(true);
     const [selectedTopic, setSelectedTopic] = useState(null);
 
-    useEffect(() => {
-        fetchData();
-    }, []);
+    useEffect(() => { fetchData(); }, []);
 
     const fetchData = async () => {
         setLoading(true);
@@ -28,7 +30,6 @@ const AIPathCurriculum = () => {
     };
 
     const handleTopicToggle = async (moduleId, topicId, newStatus) => {
-        // Optimistic update
         setAiProfile(prev => ({
             ...prev,
             currentPath: {
@@ -40,26 +41,31 @@ const AIPathCurriculum = () => {
                 )
             }
         }));
-
         try {
             await api.post('/courses/path/toggle-topic', { moduleId, topicId, status: newStatus });
         } catch (error) {
             console.error("Failed to toggle topic:", error);
-            fetchData(); // Revert on failure
+            fetchData();
         }
     };
 
     if (loading) return (
-        <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-            <Loader className="w-12 h-12 text-purple-500 animate-spin" />
+        <div style={{ minHeight: '100vh', background: theme.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Loader style={{ color: accent.from, width: 44, height: 44 }} className="animate-spin" />
         </div>
     );
 
     if (!aiProfile || !aiProfile.currentPath) {
         return (
-            <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center">
-                <p className="text-gray-400 mb-4">Path not found.</p>
-                <button onClick={() => navigate('/onboarding')} className="bg-purple-600 px-6 py-2 rounded-lg font-bold">
+            <div style={{ minHeight: '100vh', background: theme.bg, color: theme.textPrimary, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', fontFamily: "'DM Sans', sans-serif" }}>
+                <div style={{ width: '56px', height: '56px', borderRadius: '16px', background: theme.surface, border: `1px solid ${theme.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Brain size={24} style={{ color: theme.textMuted }} />
+                </div>
+                <p style={{ color: theme.textMuted, fontSize: '14px' }}>No learning path found.</p>
+                <button
+                    onClick={() => navigate('/onboarding')}
+                    style={{ background: aGrad, color: '#fff', border: 'none', padding: '10px 24px', borderRadius: '10px', fontWeight: 700, cursor: 'pointer', fontSize: '14px', boxShadow: `0 4px 16px ${accent.from}35` }}
+                >
                     Create New Path
                 </button>
             </div>
@@ -67,10 +73,8 @@ const AIPathCurriculum = () => {
     }
 
     return (
-        // ✅ FIX: min-h-screen with natural scroll — no overflow-hidden anywhere
-        <div className="min-h-screen bg-gray-900 text-white font-sans">
+        <div style={{ minHeight: '100vh', background: theme.bg, color: theme.textPrimary, fontFamily: "'DM Sans', sans-serif" }}>
 
-            {/* Topic Detail Modal */}
             {selectedTopic && (
                 <TopicDetailModal
                     moduleId={selectedTopic.moduleId}
@@ -81,54 +85,79 @@ const AIPathCurriculum = () => {
             )}
 
             {/* Sticky Nav */}
-            <div className="sticky top-0 z-50 bg-gray-900/95 backdrop-blur-md border-b border-gray-800 px-8 py-4">
-                <div className="max-w-5xl mx-auto">
+            <div style={{ position: 'sticky', top: 0, zIndex: 50, background: theme.headerBg, backdropFilter: 'blur(12px)', borderBottom: `1px solid ${theme.border}`, padding: '14px 32px' }}>
+                <div style={{ maxWidth: '860px', margin: '0 auto' }}>
                     <button
                         onClick={() => navigate('/my-courses')}
-                        className="flex items-center text-gray-400 hover:text-white transition-colors"
+                        style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'none', border: 'none', color: theme.textSecondary, cursor: 'pointer', fontSize: '14px', fontWeight: 500, padding: '4px 0', transition: 'color .15s', fontFamily: 'inherit' }}
+                        onMouseEnter={e => e.currentTarget.style.color = theme.textPrimary}
+                        onMouseLeave={e => e.currentTarget.style.color = theme.textSecondary}
                     >
-                        <ChevronLeft className="w-5 h-5 mr-1" /> Back to My Learning
+                        <ChevronLeft size={18} /> Back to My Learning
                     </button>
                 </div>
             </div>
 
             {/* Page Content */}
-            <div className="max-w-5xl mx-auto px-8 pb-16 pt-8">
+            <div style={{ maxWidth: '860px', margin: '0 auto', padding: '32px 24px 64px' }}>
 
                 {/* Hero Card */}
-                <div className="bg-gradient-to-r from-purple-900/40 to-blue-900/40 border border-purple-500/30 rounded-2xl p-8 mb-8 shadow-xl">
-                    <div className="flex items-start justify-between">
+                <div style={{
+                    background: `linear-gradient(135deg,${accent.from}18,${accent.to}12)`,
+                    border: `1px solid ${accent.from}30`,
+                    borderRadius: '20px',
+                    padding: '28px 32px',
+                    marginBottom: '28px',
+                    position: 'relative',
+                    overflow: 'hidden',
+                }}>
+                    {/* Accent top bar */}
+                    <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: aGrad }} />
+
+                    {/* Glow blur */}
+                    <div style={{ position: 'absolute', top: '-40px', right: '-40px', width: '200px', height: '200px', background: `${accent.from}12`, borderRadius: '50%', filter: 'blur(60px)', pointerEvents: 'none' }} />
+
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', position: 'relative' }}>
                         <div>
-                            <span className="text-purple-400 font-bold uppercase tracking-wider text-sm mb-2 block">
-                                AI Generated Path
-                            </span>
-                            <h1 className="text-4xl font-black text-white mb-3">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                                <Brain size={13} style={{ color: accent.from }} />
+                                <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: accent.from }}>
+                                    AI Generated Path
+                                </span>
+                            </div>
+                            <h1 style={{ fontSize: '32px', fontWeight: 800, color: theme.textPrimary, margin: '0 0 12px', lineHeight: 1.2, fontFamily: "'Sora', sans-serif" }}>
                                 {aiProfile.onboarding?.field || 'Custom Path'}
                             </h1>
-                            <div className="flex gap-3 flex-wrap">
-                                <span className="bg-purple-500/20 text-purple-300 px-3 py-1 rounded-full text-sm font-medium border border-purple-500/30">
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                <span style={{
+                                    background: `${accent.from}18`, color: accent.from,
+                                    border: `1px solid ${accent.from}35`,
+                                    padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 600
+                                }}>
                                     {aiProfile.onboarding?.level} Level
                                 </span>
-                                <span className="bg-blue-500/20 text-blue-300 px-3 py-1 rounded-full text-sm font-medium border border-blue-500/30">
+                                <span style={{
+                                    background: theme.surface2, color: theme.textSecondary,
+                                    border: `1px solid ${theme.border}`,
+                                    padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 600
+                                }}>
                                     {aiProfile.currentPath.modules.length} Weeks
                                 </span>
                             </div>
                         </div>
-                        <div className="text-right hidden md:block">
-                            <div className="text-sm text-gray-400 mb-1">Generated on</div>
-                            <div className="text-white font-mono">
+                        <div style={{ textAlign: 'right', flexShrink: 0 }} className="hidden md:block">
+                            <div style={{ fontSize: '11px', color: theme.textMuted, marginBottom: '4px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Generated on</div>
+                            <div style={{ fontSize: '14px', fontWeight: 700, color: theme.textSecondary, fontFamily: 'monospace' }}>
                                 {new Date(aiProfile.currentPath.generatedAt).toLocaleDateString()}
                             </div>
                         </div>
                     </div>
                 </div>
 
-                {/* ✅ FIX: RoadmapTree is NOT wrapped in a height-constrained box anymore.
-                    The old bg-gray-800 rounded-xl with fixed padding was clipping scroll.
-                    Now it renders directly in the flow with just a label above it. */}
-                <div className="flex items-center gap-2 mb-4 px-1">
-                    <BookOpen className="text-blue-400 w-5 h-5" />
-                    <h3 className="text-xl font-bold text-white">Weekly Schedule</h3>
+                {/* Section label */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', paddingLeft: '2px' }}>
+                    <BookOpen size={17} style={{ color: accent.from }} />
+                    <h3 style={{ fontSize: '16px', fontWeight: 700, color: theme.textPrimary, margin: 0 }}>Weekly Schedule</h3>
                 </div>
 
                 <RoadmapTree

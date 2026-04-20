@@ -1,21 +1,21 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, createContext, useContext } from 'react';
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-    LineChart, Line, CartesianGrid, PieChart, Pie, Cell,
+    CartesianGrid, PieChart, Pie, Cell,
     RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
     Area, AreaChart
 } from 'recharts';
 import {
     Loader, Users, AlertTriangle, Brain, Trophy, Clock,
-    ChevronRight, ArrowLeft, TrendingUp, TrendingDown, Target,
-    BookOpen, HelpCircle, Eye, Activity, Shield, Zap,
-    CheckCircle, XCircle, BarChart3, PieChart as PieIcon
+    ChevronRight, ArrowLeft, TrendingUp, Target,
+    BookOpen, HelpCircle, Eye, Activity, Zap,
+    CheckCircle, XCircle
 } from 'lucide-react';
 import api from '../api/axios';
+import { useAppTheme } from '../hooks/useAppTheme';
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// CONSTANTS
-// ═══════════════════════════════════════════════════════════════════════════════
+const Ctx = createContext({});
+const useT = () => useContext(Ctx);
 
 const RISK_COLORS = {
     on_track: { bg: 'rgba(34,197,94,0.12)', text: '#4ade80', border: 'rgba(34,197,94,0.3)', label: 'On Track' },
@@ -37,16 +37,19 @@ const ATTENTION_STYLES = {
     ok: { bg: 'rgba(34,197,94,0.1)', text: '#4ade80', icon: CheckCircle },
 };
 
-const TOOLTIP_STYLE = {
-    contentStyle: { backgroundColor: '#1f2937', borderColor: '#374151', borderRadius: '12px', color: '#fff', fontSize: '13px' },
-    cursor: { fill: 'rgba(139,92,246,0.08)' },
-};
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const TeacherAnalytics = ({ courses = [] }) => {
+    const { theme, accent } = useAppTheme();
+    const aGrad = `linear-gradient(135deg,${accent.from},${accent.to})`;
+    const tooltipStyle = {
+        contentStyle: { backgroundColor: theme.surface, borderColor: theme.border, borderRadius: '12px', color: theme.textPrimary, fontSize: '13px' },
+        cursor: { fill: `${accent.from}14` },
+    };
+    const ctxValue = { theme, accent, aGrad, tooltipStyle };
+
     const safeCourses = Array.isArray(courses) ? courses : [];
     const [selectedCourse, setSelectedCourse] = useState(safeCourses[0]?._id || '');
     const [activeView, setActiveView] = useState('overview');
@@ -55,11 +58,8 @@ const TeacherAnalytics = ({ courses = [] }) => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
 
-    // Update selected course when courses load after initial render
     useEffect(() => {
-        if (!selectedCourse && safeCourses.length > 0) {
-            setSelectedCourse(safeCourses[0]._id);
-        }
+        if (!selectedCourse && safeCourses.length > 0) setSelectedCourse(safeCourses[0]._id);
     }, [safeCourses.length]);
 
     const views = [
@@ -71,7 +71,6 @@ const TeacherAnalytics = ({ courses = [] }) => {
         { id: 'engagement', label: 'Engagement', icon: TrendingUp },
     ];
 
-    // Fetch data when course or view changes
     useEffect(() => {
         if (!selectedCourse) return;
         if (activeView === 'student-detail' && selectedStudentId) {
@@ -90,91 +89,81 @@ const TeacherAnalytics = ({ courses = [] }) => {
     }, [selectedCourse, activeView, selectedStudentId]);
 
     const fetchData = async (endpoint) => {
-        setLoading(true);
-        setError(null);
+        setLoading(true); setError(null);
         try {
             const res = await api.get(endpoint);
             setData(res.data);
         } catch (err) {
-            console.error('Analytics fetch error:', err);
             setError(err.response?.data?.error || 'Failed to load analytics');
         } finally {
             setLoading(false);
         }
     };
 
-    const openStudentDetail = (studentId) => {
-        setSelectedStudentId(studentId);
-        setActiveView('student-detail');
-    };
-
-    const backFromStudent = () => {
-        setSelectedStudentId(null);
-        setActiveView('overview');
-    };
+    const openStudentDetail = (studentId) => { setSelectedStudentId(studentId); setActiveView('student-detail'); };
+    const backFromStudent = () => { setSelectedStudentId(null); setActiveView('overview'); };
 
     if (safeCourses.length === 0) {
-        return <EmptyState message="Create a course and enroll students to see analytics." />;
+        return <Ctx.Provider value={ctxValue}><EmptyState message="Create a course and enroll students to see analytics." /></Ctx.Provider>;
     }
 
     return (
-        <div className="space-y-6">
-            {/* Course Selector + View Tabs */}
-            <div className="flex flex-col gap-4">
-                <div className="flex items-center gap-4">
-                    <select
-                        value={selectedCourse}
-                        onChange={(e) => { setSelectedCourse(e.target.value); setActiveView('overview'); setSelectedStudentId(null); }}
-                        className="bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-purple-500 outline-none text-sm font-medium min-w-[200px]"
-                    >
-                        {safeCourses.map(c => <option key={c._id} value={c._id}>{c.title}</option>)}
-                    </select>
+        <Ctx.Provider value={ctxValue}>
+            <div className="space-y-6">
+                <div className="flex flex-col gap-4">
+                    <div className="flex items-center gap-4">
+                        <select
+                            value={selectedCourse}
+                            onChange={e => { setSelectedCourse(e.target.value); setActiveView('overview'); setSelectedStudentId(null); }}
+                            style={{ background: theme.surface, border: `1px solid ${theme.border}`, color: theme.textPrimary, borderRadius: '12px', padding: '10px 16px', fontSize: '14px', fontWeight: 500, minWidth: '200px', outline: 'none', fontFamily: 'inherit', cursor: 'pointer' }}
+                        >
+                            {safeCourses.map(c => <option key={c._id} value={c._id}>{c.title}</option>)}
+                        </select>
+                        {activeView === 'student-detail' && (
+                            <button onClick={backFromStudent}
+                                style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'none', border: 'none', cursor: 'pointer', color: accent.from, fontSize: '14px', fontWeight: 500, fontFamily: 'inherit' }}>
+                                <ArrowLeft size={16} /> Back to Overview
+                            </button>
+                        )}
+                    </div>
 
-                    {activeView === 'student-detail' && (
-                        <button onClick={backFromStudent} className="flex items-center gap-2 text-purple-400 hover:text-purple-300 text-sm font-medium transition">
-                            <ArrowLeft size={16} /> Back to Overview
-                        </button>
+                    {activeView !== 'student-detail' && (
+                        <div style={{ display: 'flex', gap: '4px', background: `${theme.surface}80`, border: `1px solid ${theme.border}80`, borderRadius: '12px', padding: '4px', overflowX: 'auto' }}>
+                            {views.map(v => {
+                                const isActive = activeView === v.id;
+                                return (
+                                    <button key={v.id} onClick={() => setActiveView(v.id)}
+                                        style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 500, whiteSpace: 'nowrap', border: 'none', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.2s', background: isActive ? aGrad : 'transparent', color: isActive ? '#fff' : theme.textMuted, boxShadow: isActive ? `0 4px 14px ${accent.glow}` : 'none' }}
+                                        onMouseEnter={e => { if (!isActive) { e.currentTarget.style.color = theme.textPrimary; e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; } }}
+                                        onMouseLeave={e => { if (!isActive) { e.currentTarget.style.color = theme.textMuted; e.currentTarget.style.background = 'transparent'; } }}
+                                    >
+                                        <v.icon size={15} />{v.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
                     )}
                 </div>
 
-                {activeView !== 'student-detail' && (
-                    <div className="flex gap-1 bg-gray-800/50 p-1 rounded-xl border border-gray-700/50 overflow-x-auto">
-                        {views.map(v => (
-                            <button
-                                key={v.id}
-                                onClick={() => setActiveView(v.id)}
-                                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all ${activeView === v.id
-                                        ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/30'
-                                        : 'text-gray-400 hover:text-white hover:bg-white/5'
-                                    }`}
-                            >
-                                <v.icon size={15} />
-                                {v.label}
-                            </button>
-                        ))}
+                {loading ? (
+                    <div className="flex items-center justify-center h-64">
+                        <Loader size={32} style={{ color: accent.from }} className="animate-spin" />
                     </div>
-                )}
+                ) : error ? (
+                    <ErrorState message={error} onRetry={() => fetchData(`/analytics/${selectedCourse}/${activeView}`)} />
+                ) : data ? (
+                    <>
+                        {activeView === 'overview' && <OverviewView data={data} onStudentClick={openStudentDetail} />}
+                        {activeView === 'topics' && <TopicsView data={data} />}
+                        {activeView === 'quiz-analysis' && <QuizForensicsView data={data} />}
+                        {activeView === 'leaderboard' && <LeaderboardView data={data} onStudentClick={openStudentDetail} />}
+                        {activeView === 'at-risk' && <AtRiskView data={data} onStudentClick={openStudentDetail} />}
+                        {activeView === 'engagement' && <EngagementView data={data} />}
+                        {activeView === 'student-detail' && <StudentDetailView data={data} onBack={backFromStudent} />}
+                    </>
+                ) : null}
             </div>
-
-            {/* Content */}
-            {loading ? (
-                <div className="flex items-center justify-center h-64">
-                    <Loader className="w-8 h-8 text-purple-400 animate-spin" />
-                </div>
-            ) : error ? (
-                <ErrorState message={error} onRetry={() => setActiveView(activeView)} />
-            ) : data ? (
-                <>
-                    {activeView === 'overview' && <OverviewView data={data} onStudentClick={openStudentDetail} />}
-                    {activeView === 'topics' && <TopicsView data={data} />}
-                    {activeView === 'quiz-analysis' && <QuizForensicsView data={data} />}
-                    {activeView === 'leaderboard' && <LeaderboardView data={data} onStudentClick={openStudentDetail} />}
-                    {activeView === 'at-risk' && <AtRiskView data={data} onStudentClick={openStudentDetail} />}
-                    {activeView === 'engagement' && <EngagementView data={data} />}
-                    {activeView === 'student-detail' && <StudentDetailView data={data} onBack={backFromStudent} />}
-                </>
-            ) : null}
-        </div>
+        </Ctx.Provider>
     );
 };
 
@@ -183,134 +172,122 @@ const TeacherAnalytics = ({ courses = [] }) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const OverviewView = ({ data, onStudentClick }) => {
+    const { theme, accent, tooltipStyle } = useT();
     const { summary, riskDistribution, engagementTrend, students } = data;
 
-    const riskData = Object.entries(riskDistribution || {}).map(([key, val]) => ({
-        name: RISK_COLORS[key]?.label || key, value: val, color: RISK_COLORS[key]?.text || '#9ca3af',
-    })).filter(d => d.value > 0);
+    const riskData = Object.entries(riskDistribution || {})
+        .map(([key, val]) => ({ name: RISK_COLORS[key]?.label || key, value: val, color: RISK_COLORS[key]?.text || '#9ca3af' }))
+        .filter(d => d.value > 0);
 
     return (
         <div className="space-y-6">
-            {/* KPI Row */}
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
                 <KPICard label="Students" value={data.totalStudents} icon={Users} color="#8b5cf6" />
                 <KPICard label="Avg Progress" value={`${summary?.avgCompletion || 0}%`} icon={Target} color="#3b82f6" />
                 <KPICard label="Avg Quiz Score" value={`${summary?.avgScore || 0}%`} icon={Brain} color="#10b981" />
                 <KPICard label="Avg Study Time" value={summary?.avgTimeSpent || '0h'} icon={Clock} color="#f59e0b" />
-                <KPICard label="Active (7d)" value={`${summary?.activeRate || 0}%`} icon={Activity} color="#ef4444"
-                    subtitle={`${summary?.activeIn7Days || 0} students`} />
+                <KPICard label="Active (7d)" value={`${summary?.activeRate || 0}%`} icon={Activity} color="#ef4444" subtitle={`${summary?.activeIn7Days || 0} students`} />
             </div>
 
-            {/* Charts Row */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Engagement Trend */}
-                <div className="lg:col-span-2 bg-gray-800 border border-gray-700 rounded-2xl p-6">
-                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">14-Day Engagement</h3>
-                    <div className="h-56">
+                <div className="lg:col-span-2 rounded-2xl p-6" style={{ background: theme.surface, border: `1px solid ${theme.border}` }}>
+                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '16px' }}>14-Day Engagement</h3>
+                    <div style={{ height: '224px' }}>
                         <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={engagementTrend || []}>
                                 <defs>
                                     <linearGradient id="engGrad" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
-                                        <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                                        <stop offset="5%" stopColor={accent.from} stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor={accent.from} stopOpacity={0} />
                                     </linearGradient>
                                 </defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                                <XAxis dataKey="date" stroke="#6b7280" tick={{ fontSize: 11 }}
-                                    tickFormatter={d => d?.slice(5)} />
-                                <YAxis stroke="#6b7280" tick={{ fontSize: 11 }} />
-                                <Tooltip {...TOOLTIP_STYLE} />
-                                <Area type="monotone" dataKey="activeStudents" stroke="#8b5cf6" strokeWidth={2}
-                                    fill="url(#engGrad)" name="Active Students" />
+                                <CartesianGrid strokeDasharray="3 3" stroke={theme.border} />
+                                <XAxis dataKey="date" stroke={theme.textMuted} tick={{ fontSize: 11, fill: theme.textMuted }} tickFormatter={d => d?.slice(5)} />
+                                <YAxis stroke={theme.textMuted} tick={{ fontSize: 11, fill: theme.textMuted }} />
+                                <Tooltip {...tooltipStyle} />
+                                <Area type="monotone" dataKey="activeStudents" stroke={accent.from} strokeWidth={2} fill="url(#engGrad)" name="Active Students" />
                             </AreaChart>
                         </ResponsiveContainer>
                     </div>
                 </div>
 
-                {/* Risk Distribution */}
-                <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6">
-                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Risk Distribution</h3>
+                <div className="rounded-2xl p-6" style={{ background: theme.surface, border: `1px solid ${theme.border}` }}>
+                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '16px' }}>Risk Distribution</h3>
                     {riskData.length > 0 ? (
                         <>
-                            <div className="h-40 mb-4">
+                            <div style={{ height: '160px', marginBottom: '16px' }}>
                                 <ResponsiveContainer width="100%" height="100%">
                                     <PieChart>
-                                        <Pie data={riskData} dataKey="value" nameKey="name" cx="50%" cy="50%"
-                                            innerRadius={40} outerRadius={65} paddingAngle={3}>
+                                        <Pie data={riskData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={40} outerRadius={65} paddingAngle={3}>
                                             {riskData.map((d, i) => <Cell key={i} fill={d.color} />)}
                                         </Pie>
-                                        <Tooltip {...TOOLTIP_STYLE} />
+                                        <Tooltip {...tooltipStyle} />
                                     </PieChart>
                                 </ResponsiveContainer>
                             </div>
                             <div className="space-y-2">
                                 {riskData.map(d => (
-                                    <div key={d.name} className="flex items-center justify-between text-sm">
+                                    <div key={d.name} className="flex items-center justify-between" style={{ fontSize: '13px' }}>
                                         <div className="flex items-center gap-2">
-                                            <div className="w-2.5 h-2.5 rounded-full" style={{ background: d.color }} />
-                                            <span className="text-gray-300">{d.name}</span>
+                                            <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: d.color }} />
+                                            <span style={{ color: theme.textSecondary }}>{d.name}</span>
                                         </div>
-                                        <span className="font-bold text-white">{d.value}</span>
+                                        <span style={{ fontWeight: 700, color: theme.textPrimary }}>{d.value}</span>
                                     </div>
                                 ))}
                             </div>
                         </>
-                    ) : <p className="text-gray-500 text-sm text-center mt-8">No data yet</p>}
+                    ) : <p style={{ color: theme.textMuted, fontSize: '14px', textAlign: 'center', marginTop: '32px' }}>No data yet</p>}
                 </div>
             </div>
 
-            {/* Student Table */}
-            <div className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-700">
-                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">All Students</h3>
+            <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', overflow: 'hidden' }}>
+                <div style={{ padding: '16px 24px', borderBottom: `1px solid ${theme.border}` }}>
+                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0 }}>All Students</h3>
                 </div>
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                        <thead className="bg-gray-750 text-gray-400 text-xs uppercase tracking-wider">
-                            <tr>
-                                <th className="px-6 py-3 text-left">Student</th>
-                                <th className="px-4 py-3 text-center">Progress</th>
-                                <th className="px-4 py-3 text-center">Avg Score</th>
-                                <th className="px-4 py-3 text-center">Time</th>
-                                <th className="px-4 py-3 text-center">Status</th>
-                                <th className="px-4 py-3 text-center">Last Active</th>
-                                <th className="px-4 py-3"></th>
+                <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse' }}>
+                        <thead>
+                            <tr style={{ background: theme.bg }}>
+                                {['Student', 'Progress', 'Avg Score', 'Time', 'Status', 'Last Active', ''].map((h, i) => (
+                                    <th key={i} style={{ padding: i === 0 ? '12px 24px' : '12px 16px', textAlign: i === 0 ? 'left' : i === 6 ? 'right' : 'center', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em' }}>{h}</th>
+                                ))}
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-700/50">
+                        <tbody>
                             {(students || []).map(s => {
                                 const risk = RISK_COLORS[s.risk] || RISK_COLORS.on_track;
                                 return (
-                                    <tr key={s.studentId} className="hover:bg-white/[0.02] transition">
-                                        <td className="px-6 py-3">
-                                            <div className="font-medium text-white">{s.name}</div>
-                                            <div className="text-xs text-gray-500">{s.email}</div>
+                                    <tr key={s.studentId} style={{ borderTop: `1px solid ${theme.border}50` }}
+                                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+                                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                                        <td style={{ padding: '12px 24px' }}>
+                                            <div style={{ fontWeight: 500, color: theme.textPrimary }}>{s.name}</div>
+                                            <div style={{ fontSize: '11px', color: theme.textMuted }}>{s.email}</div>
                                         </td>
-                                        <td className="px-4 py-3 text-center">
+                                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
                                             <div className="flex items-center gap-2 justify-center">
-                                                <div className="w-16 h-1.5 bg-gray-700 rounded-full overflow-hidden">
-                                                    <div className="h-full bg-purple-500 rounded-full" style={{ width: `${s.completionPct}%` }} />
+                                                <div style={{ width: '64px', height: '6px', background: theme.bg, borderRadius: '99px', overflow: 'hidden' }}>
+                                                    <div style={{ height: '100%', borderRadius: '99px', background: accent.from, width: `${s.completionPct}%` }} />
                                                 </div>
-                                                <span className="text-xs font-mono text-gray-300">{s.completionPct}%</span>
+                                                <span style={{ fontSize: '11px', fontFamily: 'monospace', color: theme.textSecondary }}>{s.completionPct}%</span>
                                             </div>
                                         </td>
-                                        <td className="px-4 py-3 text-center">
-                                            <span className={`font-bold ${s.avgQuizScore >= 70 ? 'text-green-400' : s.avgQuizScore >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>
-                                                {s.avgQuizScore}%
-                                            </span>
+                                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                                            <span style={{ fontWeight: 700, color: s.avgQuizScore >= 70 ? '#22c55e' : s.avgQuizScore >= 50 ? '#fbbf24' : '#ef4444' }}>{s.avgQuizScore}%</span>
                                         </td>
-                                        <td className="px-4 py-3 text-center text-gray-300">{s.totalTimeFormatted}</td>
-                                        <td className="px-4 py-3 text-center">
-                                            <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{ background: risk.bg, color: risk.text, border: `1px solid ${risk.border}` }}>
-                                                {risk.label}
-                                            </span>
+                                        <td style={{ padding: '12px 16px', textAlign: 'center', color: theme.textSecondary }}>{s.totalTimeFormatted}</td>
+                                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                                            <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '99px', background: risk.bg, color: risk.text, border: `1px solid ${risk.border}` }}>{risk.label}</span>
                                         </td>
-                                        <td className="px-4 py-3 text-center text-xs text-gray-500">
+                                        <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '11px', color: theme.textMuted }}>
                                             {s.daysSinceActive === 0 ? 'Today' : `${s.daysSinceActive}d ago`}
                                         </td>
-                                        <td className="px-4 py-3">
+                                        <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                                             <button onClick={() => onStudentClick(s.studentId)}
-                                                className="p-1.5 rounded-lg hover:bg-purple-500/20 text-gray-400 hover:text-purple-400 transition">
+                                                style={{ padding: '6px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: 'none', color: theme.textMuted, display: 'flex', alignItems: 'center' }}
+                                                onMouseEnter={e => { e.currentTarget.style.background = `${accent.from}20`; e.currentTarget.style.color = accent.from; }}
+                                                onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = theme.textMuted; }}>
                                                 <Eye size={15} />
                                             </button>
                                         </td>
@@ -330,81 +307,75 @@ const OverviewView = ({ data, onStudentClick }) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const TopicsView = ({ data }) => {
+    const { theme } = useT();
     const { topics, needsAttention } = data;
 
     return (
         <div className="space-y-6">
             {needsAttention > 0 && (
-                <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-5 py-3 flex items-center gap-3">
-                    <AlertTriangle className="text-red-400 flex-shrink-0" size={18} />
-                    <span className="text-red-300 text-sm font-medium">{needsAttention} topic{needsAttention > 1 ? 's' : ''} need{needsAttention === 1 ? 's' : ''} attention based on student performance.</span>
+                <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '12px', padding: '12px 20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <AlertTriangle style={{ color: '#f87171', flexShrink: 0 }} size={18} />
+                    <span style={{ color: '#fca5a5', fontSize: '14px', fontWeight: 500 }}>{needsAttention} topic{needsAttention > 1 ? 's' : ''} need{needsAttention === 1 ? 's' : ''} attention based on student performance.</span>
                 </div>
             )}
-
             <div className="space-y-4">
                 {(topics || []).map(topic => {
                     const attn = ATTENTION_STYLES[topic.attention] || ATTENTION_STYLES.ok;
                     const AttnIcon = attn.icon;
                     const bloomData = BLOOM_ORDER
                         .filter(bl => topic.bloomPerformance?.[bl])
-                        .map(bl => ({ name: bl, pct: topic.bloomPerformance[bl].percentage, full: 100 }));
+                        .map(bl => ({ name: bl, pct: topic.bloomPerformance[bl].percentage }));
 
                     return (
-                        <div key={topic.topicId} className="bg-gray-800 border border-gray-700 rounded-2xl p-6">
+                        <div key={topic.topicId} style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '24px' }}>
                             <div className="flex items-start justify-between mb-4">
                                 <div>
                                     <div className="flex items-center gap-2 mb-1">
                                         <AttnIcon size={16} style={{ color: attn.text }} />
-                                        <h3 className="text-lg font-bold text-white">{topic.title}</h3>
+                                        <h3 style={{ fontSize: '16px', fontWeight: 700, color: theme.textPrimary, margin: 0 }}>{topic.title}</h3>
                                     </div>
-                                    <p className="text-xs text-gray-500">{topic.moduleTitle} • {topic.totalAttempts} quiz attempts</p>
+                                    <p style={{ fontSize: '11px', color: theme.textMuted }}>{topic.moduleTitle} • {topic.totalAttempts} quiz attempts</p>
                                 </div>
                                 <div className="flex gap-3 text-right">
                                     <div>
-                                        <div className="text-xs text-gray-500 uppercase">Avg Score</div>
-                                        <div className={`text-xl font-bold ${(topic.avgScore || 0) >= 70 ? 'text-green-400' : (topic.avgScore || 0) >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>
-                                            {topic.avgScore ?? '—'}%
-                                        </div>
+                                        <div style={{ fontSize: '11px', color: theme.textMuted, textTransform: 'uppercase' }}>Avg Score</div>
+                                        <div style={{ fontSize: '20px', fontWeight: 700, color: (topic.avgScore || 0) >= 70 ? '#22c55e' : (topic.avgScore || 0) >= 50 ? '#fbbf24' : '#ef4444' }}>{topic.avgScore ?? '—'}%</div>
                                     </div>
                                     <div>
-                                        <div className="text-xs text-gray-500 uppercase">Fail Rate</div>
-                                        <div className="text-xl font-bold text-gray-300">{topic.failRate}%</div>
+                                        <div style={{ fontSize: '11px', color: theme.textMuted, textTransform: 'uppercase' }}>Fail Rate</div>
+                                        <div style={{ fontSize: '20px', fontWeight: 700, color: theme.textSecondary }}>{topic.failRate}%</div>
                                     </div>
                                     <div>
-                                        <div className="text-xs text-gray-500 uppercase">Completion</div>
-                                        <div className="text-xl font-bold text-gray-300">{topic.completionRate}%</div>
+                                        <div style={{ fontSize: '11px', color: theme.textMuted, textTransform: 'uppercase' }}>Completion</div>
+                                        <div style={{ fontSize: '20px', fontWeight: 700, color: theme.textSecondary }}>{topic.completionRate}%</div>
                                     </div>
                                 </div>
                             </div>
-
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                {/* Bloom's Breakdown */}
                                 {bloomData.length > 0 && (
                                     <div>
-                                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Bloom's Performance</h4>
+                                        <h4 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '12px' }}>Bloom's Performance</h4>
                                         <div className="space-y-2">
                                             {bloomData.map(b => (
                                                 <div key={b.name} className="flex items-center gap-3">
-                                                    <span className="text-xs text-gray-400 w-20 capitalize">{b.name}</span>
-                                                    <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
-                                                        <div className="h-full rounded-full transition-all" style={{ width: `${b.pct}%`, background: BLOOM_COLORS[b.name] }} />
+                                                    <span style={{ fontSize: '11px', color: theme.textMuted, width: '80px', textTransform: 'capitalize' }}>{b.name}</span>
+                                                    <div style={{ flex: 1, height: '8px', background: theme.bg, borderRadius: '99px', overflow: 'hidden' }}>
+                                                        <div style={{ height: '100%', borderRadius: '99px', width: `${b.pct}%`, background: BLOOM_COLORS[b.name] }} />
                                                     </div>
-                                                    <span className="text-xs font-mono text-gray-300 w-10 text-right">{b.pct}%</span>
+                                                    <span style={{ fontSize: '11px', fontFamily: 'monospace', color: theme.textSecondary, width: '40px', textAlign: 'right' }}>{b.pct}%</span>
                                                 </div>
                                             ))}
                                         </div>
                                     </div>
                                 )}
-
-                                {/* Most Missed Questions */}
                                 {(topic.topWrongQuestions || []).length > 0 && (
                                     <div>
-                                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Most Missed Questions</h4>
+                                        <h4 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '12px' }}>Most Missed Questions</h4>
                                         <div className="space-y-2">
                                             {topic.topWrongQuestions.map((q, i) => (
-                                                <div key={i} className="flex items-start gap-2 text-sm">
-                                                    <span className="text-red-400 font-bold text-xs mt-0.5">{q.missedBy}×</span>
-                                                    <span className="text-gray-300 line-clamp-2">{q.questionText}</span>
+                                                <div key={i} className="flex items-start gap-2" style={{ fontSize: '13px' }}>
+                                                    <span style={{ color: '#ef4444', fontWeight: 700, fontSize: '11px', marginTop: '2px' }}>{q.missedBy}×</span>
+                                                    <span style={{ color: theme.textSecondary }}>{q.questionText}</span>
                                                 </div>
                                             ))}
                                         </div>
@@ -414,7 +385,6 @@ const TopicsView = ({ data }) => {
                         </div>
                     );
                 })}
-
                 {(!topics || topics.length === 0) && <EmptyState message="No quiz data available yet." />}
             </div>
         </div>
@@ -426,6 +396,7 @@ const TopicsView = ({ data }) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const QuizForensicsView = ({ data }) => {
+    const { theme, tooltipStyle } = useT();
     const { bloomPerformance, mostMissedQuestions } = data;
 
     const bloomChartData = BLOOM_ORDER
@@ -434,17 +405,16 @@ const QuizForensicsView = ({ data }) => {
 
     return (
         <div className="space-y-6">
-            {/* Bloom's Class Performance */}
             {bloomChartData.length > 0 && (
-                <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6">
-                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Class Performance by Bloom's Level</h3>
-                    <div className="h-64">
+                <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '24px' }}>
+                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '16px' }}>Class Performance by Bloom's Level</h3>
+                    <div style={{ height: '256px' }}>
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={bloomChartData}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                                <XAxis dataKey="name" stroke="#6b7280" tick={{ fontSize: 12 }} />
-                                <YAxis stroke="#6b7280" domain={[0, 100]} tick={{ fontSize: 11 }} />
-                                <Tooltip {...TOOLTIP_STYLE} formatter={(val) => `${val}%`} />
+                                <CartesianGrid strokeDasharray="3 3" stroke={theme.border} />
+                                <XAxis dataKey="name" stroke={theme.textMuted} tick={{ fontSize: 12, fill: theme.textMuted }} />
+                                <YAxis stroke={theme.textMuted} domain={[0, 100]} tick={{ fontSize: 11, fill: theme.textMuted }} />
+                                <Tooltip {...tooltipStyle} formatter={val => `${val}%`} />
                                 <Bar dataKey="score" name="Score %" radius={[6, 6, 0, 0]} barSize={40}>
                                     {bloomChartData.map((d, i) => <Cell key={i} fill={BLOOM_COLORS[d.name] || '#8b5cf6'} />)}
                                 </Bar>
@@ -453,38 +423,38 @@ const QuizForensicsView = ({ data }) => {
                     </div>
                 </div>
             )}
-
-            {/* Most Missed Questions */}
-            <div className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-700">
-                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Most Missed Questions (All Students)</h3>
+            <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', overflow: 'hidden' }}>
+                <div style={{ padding: '16px 24px', borderBottom: `1px solid ${theme.border}` }}>
+                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0 }}>Most Missed Questions (All Students)</h3>
                 </div>
-                <div className="divide-y divide-gray-700/50">
+                <div>
                     {(mostMissedQuestions || []).map((q, i) => (
-                        <div key={i} className="px-6 py-4 hover:bg-white/[0.02]">
+                        <div key={i} style={{ padding: '16px 24px', borderBottom: `1px solid ${theme.border}50` }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                             <div className="flex items-start justify-between gap-4">
-                                <div className="flex-1">
-                                    <p className="text-white text-sm font-medium mb-2">{q.questionText}</p>
+                                <div style={{ flex: 1 }}>
+                                    <p style={{ color: theme.textPrimary, fontSize: '14px', fontWeight: 500, marginBottom: '8px' }}>{q.questionText}</p>
                                     <div className="flex flex-wrap gap-2">
-                                        {q.topic && <span className="text-xs px-2 py-0.5 bg-gray-700 rounded text-gray-300">{q.topic}</span>}
-                                        {q.bloomLevel && <span className="text-xs px-2 py-0.5 rounded capitalize" style={{ background: `${BLOOM_COLORS[q.bloomLevel]}20`, color: BLOOM_COLORS[q.bloomLevel] }}>{q.bloomLevel}</span>}
-                                        {q.difficulty && <span className="text-xs px-2 py-0.5 bg-gray-700 rounded text-gray-400 capitalize">{q.difficulty}</span>}
+                                        {q.topic && <span style={{ fontSize: '11px', padding: '2px 8px', background: theme.bg, borderRadius: '4px', color: theme.textSecondary }}>{q.topic}</span>}
+                                        {q.bloomLevel && <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', textTransform: 'capitalize', background: `${BLOOM_COLORS[q.bloomLevel]}20`, color: BLOOM_COLORS[q.bloomLevel] }}>{q.bloomLevel}</span>}
+                                        {q.difficulty && <span style={{ fontSize: '11px', padding: '2px 8px', background: theme.bg, borderRadius: '4px', color: theme.textMuted, textTransform: 'capitalize' }}>{q.difficulty}</span>}
                                     </div>
                                     {(q.commonWrongAnswers || []).length > 0 && (
-                                        <div className="mt-2 text-xs text-gray-500">
+                                        <div style={{ marginTop: '8px', fontSize: '11px', color: theme.textMuted }}>
                                             Common wrong picks: {q.commonWrongAnswers.map(a => `"${a.answer}" (${a.count}×)`).join(', ')}
                                         </div>
                                     )}
                                 </div>
-                                <div className="text-right flex-shrink-0">
-                                    <div className="text-2xl font-bold text-red-400">{q.missedCount}</div>
-                                    <div className="text-xs text-gray-500">students missed</div>
+                                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                                    <div style={{ fontSize: '24px', fontWeight: 700, color: '#ef4444' }}>{q.missedCount}</div>
+                                    <div style={{ fontSize: '11px', color: theme.textMuted }}>students missed</div>
                                 </div>
                             </div>
                         </div>
                     ))}
                     {(!mostMissedQuestions || mostMissedQuestions.length === 0) && (
-                        <div className="px-6 py-8 text-center text-gray-500 text-sm">No quiz data available yet.</div>
+                        <div style={{ padding: '32px 24px', textAlign: 'center', color: theme.textMuted, fontSize: '14px' }}>No quiz data available yet.</div>
                     )}
                 </div>
             </div>
@@ -497,36 +467,43 @@ const QuizForensicsView = ({ data }) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const LeaderboardView = ({ data, onStudentClick }) => {
+    const { theme, accent } = useT();
     const { leaderboard } = data;
 
+    const rankStyle = rank => {
+        if (rank === 1) return { background: 'rgba(234,179,8,0.15)', color: '#fbbf24', border: '1px solid rgba(234,179,8,0.3)' };
+        if (rank === 2) return { background: 'rgba(156,163,175,0.15)', color: '#d1d5db', border: '1px solid rgba(156,163,175,0.3)' };
+        if (rank === 3) return { background: 'rgba(249,115,22,0.15)', color: '#fb923c', border: '1px solid rgba(249,115,22,0.3)' };
+        return { background: theme.bg, color: theme.textMuted, border: `1px solid ${theme.border}` };
+    };
+
     return (
-        <div className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-700 flex items-center justify-between">
-                <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Ranked by Composite Score</h3>
-                <span className="text-xs text-gray-500">40% completion + 40% quiz + 20% time</span>
+        <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', overflow: 'hidden' }}>
+            <div style={{ padding: '16px 24px', borderBottom: `1px solid ${theme.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0 }}>Ranked by Composite Score</h3>
+                <span style={{ fontSize: '11px', color: theme.textMuted }}>40% completion + 40% quiz + 20% time</span>
             </div>
-            <div className="divide-y divide-gray-700/50">
+            <div>
                 {(leaderboard || []).map(s => (
-                    <div key={s.studentId} className="px-6 py-4 flex items-center gap-4 hover:bg-white/[0.02] transition cursor-pointer"
-                        onClick={() => onStudentClick(s.studentId)}>
-                        <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${s.rank === 1 ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
-                                s.rank === 2 ? 'bg-gray-400/20 text-gray-300 border border-gray-400/30' :
-                                    s.rank === 3 ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
-                                        'bg-gray-700 text-gray-400'
-                            }`}>
+                    <div key={s.studentId}
+                        style={{ padding: '16px 24px', display: 'flex', alignItems: 'center', gap: '16px', cursor: 'pointer', borderBottom: `1px solid ${theme.border}50` }}
+                        onClick={() => onStudentClick(s.studentId)}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                        <div style={{ width: '36px', height: '36px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 700, flexShrink: 0, ...rankStyle(s.rank) }}>
                             {s.rank}
                         </div>
-                        <div className="flex-1 min-w-0">
-                            <div className="font-medium text-white truncate">{s.name}</div>
-                            <div className="text-xs text-gray-500 truncate">{s.email}</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 500, color: theme.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</div>
+                            <div style={{ fontSize: '11px', color: theme.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.email}</div>
                         </div>
-                        <div className="flex gap-6 text-center flex-shrink-0">
-                            <div><div className="text-xs text-gray-500">Score</div><div className="font-bold text-purple-400">{s.compositeScore}</div></div>
-                            <div><div className="text-xs text-gray-500">Progress</div><div className="font-bold text-white">{s.completionPct}%</div></div>
-                            <div><div className="text-xs text-gray-500">Quiz</div><div className="font-bold text-white">{s.avgQuizScore}%</div></div>
-                            <div><div className="text-xs text-gray-500">Streak</div><div className="font-bold text-yellow-400">{s.streak}d</div></div>
+                        <div className="flex gap-6 text-center" style={{ flexShrink: 0 }}>
+                            <div><div style={{ fontSize: '11px', color: theme.textMuted }}>Score</div><div style={{ fontWeight: 700, color: accent.from }}>{s.compositeScore}</div></div>
+                            <div><div style={{ fontSize: '11px', color: theme.textMuted }}>Progress</div><div style={{ fontWeight: 700, color: theme.textPrimary }}>{s.completionPct}%</div></div>
+                            <div><div style={{ fontSize: '11px', color: theme.textMuted }}>Quiz</div><div style={{ fontWeight: 700, color: theme.textPrimary }}>{s.avgQuizScore}%</div></div>
+                            <div><div style={{ fontSize: '11px', color: theme.textMuted }}>Streak</div><div style={{ fontWeight: 700, color: '#fbbf24' }}>{s.streak}d</div></div>
                         </div>
-                        <ChevronRight size={16} className="text-gray-600 flex-shrink-0" />
+                        <ChevronRight size={16} style={{ color: theme.textMuted, flexShrink: 0 }} />
                     </div>
                 ))}
             </div>
@@ -539,53 +516,49 @@ const LeaderboardView = ({ data, onStudentClick }) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const AtRiskView = ({ data, onStudentClick }) => {
+    const { theme, accent } = useT();
     const { alerts, atRiskCount } = data;
 
     return (
         <div className="space-y-4">
-            <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-5 py-3">
-                <span className="text-red-300 text-sm font-medium">{atRiskCount} student{atRiskCount !== 1 ? 's' : ''} flagged — review recommended.</span>
+            <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '12px', padding: '12px 20px' }}>
+                <span style={{ color: '#fca5a5', fontSize: '14px', fontWeight: 500 }}>{atRiskCount} student{atRiskCount !== 1 ? 's' : ''} flagged — review recommended.</span>
             </div>
-
             {(alerts || []).map(a => {
                 const sev = a.severity === 'critical' ? RISK_COLORS.critical : RISK_COLORS.at_risk;
                 return (
-                    <div key={a.studentId} className="bg-gray-800 border rounded-2xl p-6 cursor-pointer hover:bg-white/[0.02] transition"
-                        style={{ borderColor: sev.border }}
-                        onClick={() => onStudentClick(a.studentId)}>
+                    <div key={a.studentId}
+                        style={{ background: theme.surface, border: `1px solid ${sev.border}`, borderRadius: '16px', padding: '24px', cursor: 'pointer', transition: 'background 0.15s' }}
+                        onClick={() => onStudentClick(a.studentId)}
+                        onMouseEnter={e => e.currentTarget.style.background = `${theme.bg}`}
+                        onMouseLeave={e => e.currentTarget.style.background = theme.surface}>
                         <div className="flex items-start justify-between mb-3">
                             <div>
                                 <div className="flex items-center gap-2 mb-1">
-                                    <span className="text-xs font-bold px-2 py-0.5 rounded-full uppercase" style={{ background: sev.bg, color: sev.text }}>
-                                        {a.severity}
-                                    </span>
-                                    <h3 className="text-lg font-bold text-white">{a.name}</h3>
+                                    <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '99px', textTransform: 'uppercase', background: sev.bg, color: sev.text }}>{a.severity}</span>
+                                    <h3 style={{ fontSize: '16px', fontWeight: 700, color: theme.textPrimary, margin: 0 }}>{a.name}</h3>
                                 </div>
-                                <p className="text-xs text-gray-500">{a.email}</p>
+                                <p style={{ fontSize: '11px', color: theme.textMuted }}>{a.email}</p>
                             </div>
-                            <div className="text-right">
-                                <div className="text-sm text-gray-400">Last active {a.daysSinceActive}d ago</div>
-                                <div className="text-xs text-gray-500">Avg: {a.avgQuizScore}% • {a.completionPct}% done</div>
+                            <div style={{ textAlign: 'right' }}>
+                                <div style={{ fontSize: '13px', color: theme.textMuted }}>Last active {a.daysSinceActive}d ago</div>
+                                <div style={{ fontSize: '11px', color: theme.textMuted }}>Avg: {a.avgQuizScore}% • {a.completionPct}% done</div>
                             </div>
                         </div>
-
                         <div className="space-y-1 mb-3">
                             {(a.reasons || []).map((r, i) => (
-                                <div key={i} className="flex items-center gap-2 text-sm text-gray-300">
-                                    <AlertTriangle size={13} className="text-yellow-500 flex-shrink-0" />
-                                    {r}
+                                <div key={i} className="flex items-center gap-2" style={{ fontSize: '13px', color: theme.textSecondary }}>
+                                    <AlertTriangle size={13} style={{ color: '#fbbf24', flexShrink: 0 }} />{r}
                                 </div>
                             ))}
                         </div>
-
-                        <div className="bg-gray-900/50 rounded-lg px-4 py-2.5 flex items-center gap-2">
-                            <Zap size={14} className="text-purple-400" />
-                            <span className="text-sm text-purple-300">{a.suggestedAction}</span>
+                        <div style={{ background: `${accent.from}10`, borderRadius: '8px', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Zap size={14} style={{ color: accent.from }} />
+                            <span style={{ fontSize: '13px', color: accent.from }}>{a.suggestedAction}</span>
                         </div>
                     </div>
                 );
             })}
-
             {(!alerts || alerts.length === 0) && <EmptyState message="No at-risk students detected. Great job!" />}
         </div>
     );
@@ -596,45 +569,41 @@ const AtRiskView = ({ data, onStudentClick }) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const EngagementView = ({ data }) => {
+    const { theme, tooltipStyle } = useT();
     const { timeDistribution, resourceCompletionRates, avgTotalTime } = data;
-
     const timeData = Object.entries(timeDistribution || {}).map(([range, count]) => ({ range, count }));
 
     return (
         <div className="space-y-6">
             <KPICard label="Avg Total Study Time" value={avgTotalTime || '0h'} icon={Clock} color="#8b5cf6" />
-
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Time Distribution */}
-                <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6">
-                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Study Time Distribution</h3>
-                    <div className="h-56">
+                <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '24px' }}>
+                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '16px' }}>Study Time Distribution</h3>
+                    <div style={{ height: '224px' }}>
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={timeData}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                                <XAxis dataKey="range" stroke="#6b7280" tick={{ fontSize: 12 }} />
-                                <YAxis stroke="#6b7280" tick={{ fontSize: 11 }} />
-                                <Tooltip {...TOOLTIP_STYLE} />
+                                <CartesianGrid strokeDasharray="3 3" stroke={theme.border} />
+                                <XAxis dataKey="range" stroke={theme.textMuted} tick={{ fontSize: 12, fill: theme.textMuted }} />
+                                <YAxis stroke={theme.textMuted} tick={{ fontSize: 11, fill: theme.textMuted }} />
+                                <Tooltip {...tooltipStyle} />
                                 <Bar dataKey="count" name="Students" fill="#3b82f6" radius={[6, 6, 0, 0]} barSize={36} />
                             </BarChart>
                         </ResponsiveContainer>
                     </div>
                 </div>
-
-                {/* Resource Completion */}
-                <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6">
-                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Resource Completion (Lowest First)</h3>
-                    <div className="space-y-3 max-h-56 overflow-y-auto pr-2">
+                <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '24px' }}>
+                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '16px' }}>Resource Completion (Lowest First)</h3>
+                    <div style={{ maxHeight: '224px', overflowY: 'auto', paddingRight: '8px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                         {(resourceCompletionRates || []).map((r, i) => (
                             <div key={i} className="flex items-center gap-3">
-                                <span className="text-xs text-gray-400 w-32 truncate" title={r.title}>{r.title}</span>
-                                <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
-                                    <div className="h-full rounded-full" style={{ width: `${r.completionRate}%`, background: r.completionRate < 30 ? '#ef4444' : r.completionRate < 60 ? '#f59e0b' : '#10b981' }} />
+                                <span style={{ fontSize: '11px', color: theme.textMuted, width: '128px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.title}>{r.title}</span>
+                                <div style={{ flex: 1, height: '8px', background: theme.bg, borderRadius: '99px', overflow: 'hidden' }}>
+                                    <div style={{ height: '100%', borderRadius: '99px', width: `${r.completionRate}%`, background: r.completionRate < 30 ? '#ef4444' : r.completionRate < 60 ? '#f59e0b' : '#10b981' }} />
                                 </div>
-                                <span className="text-xs font-mono text-gray-300 w-10 text-right">{r.completionRate}%</span>
+                                <span style={{ fontSize: '11px', fontFamily: 'monospace', color: theme.textSecondary, width: '40px', textAlign: 'right' }}>{r.completionRate}%</span>
                             </div>
                         ))}
-                        {(!resourceCompletionRates || resourceCompletionRates.length === 0) && <p className="text-gray-500 text-sm">No resource data yet.</p>}
+                        {(!resourceCompletionRates || resourceCompletionRates.length === 0) && <p style={{ color: theme.textMuted, fontSize: '14px' }}>No resource data yet.</p>}
                     </div>
                 </div>
             </div>
@@ -647,40 +616,34 @@ const EngagementView = ({ data }) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const StudentDetailView = ({ data, onBack }) => {
+    const { theme, accent, tooltipStyle } = useT();
     const { student, summary, bloomProfile, strengths, weaknesses, topicBreakdown, activityTimeline } = data;
 
-    const bloomRadarData = BLOOM_ORDER.map(bl => ({
-        level: bl,
-        score: bloomProfile?.[bl]?.percentage || 0,
-    }));
-
+    const bloomRadarData = BLOOM_ORDER.map(bl => ({ level: bl, score: bloomProfile?.[bl]?.percentage || 0 }));
     const activityData = (activityTimeline || []).map(d => ({
         date: d.date?.slice(5),
         minutes: Math.round((d.timeSpent || 0) / 60),
-        active: d.active ? 1 : 0,
     }));
-
     const risk = RISK_COLORS[summary?.risk] || RISK_COLORS.on_track;
 
     return (
         <div className="space-y-6">
-            {/* Student Header */}
-            <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6 flex items-center justify-between">
+            <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div>
-                    <h2 className="text-2xl font-bold text-white mb-1">{student?.name}</h2>
-                    <p className="text-sm text-gray-400">{student?.email}</p>
+                    <h2 style={{ fontSize: '24px', fontWeight: 700, color: theme.textPrimary, marginBottom: '4px' }}>{student?.name}</h2>
+                    <p style={{ fontSize: '14px', color: theme.textMuted }}>{student?.email}</p>
                 </div>
                 <div className="flex gap-4 items-center">
-                    <span className="text-xs font-bold px-3 py-1 rounded-full" style={{ background: risk.bg, color: risk.text, border: `1px solid ${risk.border}` }}>
-                        {risk.label}
-                    </span>
-                    <button onClick={onBack} className="text-sm text-gray-400 hover:text-white transition flex items-center gap-1">
+                    <span style={{ fontSize: '11px', fontWeight: 700, padding: '4px 12px', borderRadius: '99px', background: risk.bg, color: risk.text, border: `1px solid ${risk.border}` }}>{risk.label}</span>
+                    <button onClick={onBack}
+                        style={{ fontSize: '14px', color: theme.textMuted, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontFamily: 'inherit' }}
+                        onMouseEnter={e => e.currentTarget.style.color = theme.textPrimary}
+                        onMouseLeave={e => e.currentTarget.style.color = theme.textMuted}>
                         <ArrowLeft size={14} /> Back
                     </button>
                 </div>
             </div>
 
-            {/* KPIs */}
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
                 <KPICard label="Completion" value={`${summary?.completionPct || 0}%`} icon={Target} color="#8b5cf6" />
                 <KPICard label="Avg Quiz Score" value={`${summary?.avgQuizScore || 0}%`} icon={Brain} color="#10b981" />
@@ -690,25 +653,22 @@ const StudentDetailView = ({ data, onBack }) => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Bloom's Radar */}
-                <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6">
-                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Bloom's Proficiency</h3>
-                    <div className="h-56">
+                <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '24px' }}>
+                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '16px' }}>Bloom's Proficiency</h3>
+                    <div style={{ height: '224px' }}>
                         <ResponsiveContainer width="100%" height="100%">
                             <RadarChart data={bloomRadarData} cx="50%" cy="50%" outerRadius="70%">
-                                <PolarGrid stroke="#374151" />
-                                <PolarAngleAxis dataKey="level" tick={{ fill: '#9ca3af', fontSize: 11 }} />
+                                <PolarGrid stroke={theme.border} />
+                                <PolarAngleAxis dataKey="level" tick={{ fill: theme.textMuted, fontSize: 11 }} />
                                 <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
-                                <Radar dataKey="score" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.25} strokeWidth={2} />
+                                <Radar dataKey="score" stroke={accent.from} fill={accent.from} fillOpacity={0.25} strokeWidth={2} />
                             </RadarChart>
                         </ResponsiveContainer>
                     </div>
                 </div>
-
-                {/* Activity Heatmap */}
-                <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6">
-                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">30-Day Activity</h3>
-                    <div className="h-56">
+                <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '24px' }}>
+                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '16px' }}>30-Day Activity</h3>
+                    <div style={{ height: '224px' }}>
                         <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={activityData}>
                                 <defs>
@@ -717,10 +677,10 @@ const StudentDetailView = ({ data, onBack }) => {
                                         <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                                     </linearGradient>
                                 </defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                                <XAxis dataKey="date" stroke="#6b7280" tick={{ fontSize: 10 }} />
-                                <YAxis stroke="#6b7280" tick={{ fontSize: 11 }} />
-                                <Tooltip {...TOOLTIP_STYLE} />
+                                <CartesianGrid strokeDasharray="3 3" stroke={theme.border} />
+                                <XAxis dataKey="date" stroke={theme.textMuted} tick={{ fontSize: 10, fill: theme.textMuted }} />
+                                <YAxis stroke={theme.textMuted} tick={{ fontSize: 11, fill: theme.textMuted }} />
+                                <Tooltip {...tooltipStyle} />
                                 <Area type="monotone" dataKey="minutes" stroke="#10b981" fill="url(#actGrad)" name="Minutes" strokeWidth={2} />
                             </AreaChart>
                         </ResponsiveContainer>
@@ -728,72 +688,69 @@ const StudentDetailView = ({ data, onBack }) => {
                 </div>
             </div>
 
-            {/* Strengths & Weaknesses */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6">
-                    <h3 className="text-sm font-bold text-green-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '24px' }}>
+                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: '#22c55e', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <CheckCircle size={14} /> Strengths
                     </h3>
                     {(strengths || []).length > 0 ? (
                         <div className="space-y-2">
                             {strengths.map((s, i) => (
-                                <div key={i} className="flex justify-between text-sm">
-                                    <span className="text-gray-300">{s.title}</span>
-                                    <span className="font-bold text-green-400">{s.score}%</span>
+                                <div key={i} className="flex justify-between" style={{ fontSize: '13px' }}>
+                                    <span style={{ color: theme.textSecondary }}>{s.title}</span>
+                                    <span style={{ fontWeight: 700, color: '#22c55e' }}>{s.score}%</span>
                                 </div>
                             ))}
                         </div>
-                    ) : <p className="text-gray-500 text-sm">No quiz data yet</p>}
+                    ) : <p style={{ color: theme.textMuted, fontSize: '13px' }}>No quiz data yet</p>}
                 </div>
-
-                <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6">
-                    <h3 className="text-sm font-bold text-red-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '24px' }}>
+                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: '#ef4444', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <XCircle size={14} /> Weaknesses
                     </h3>
                     {(weaknesses || []).length > 0 ? (
                         <div className="space-y-3">
                             {weaknesses.map((w, i) => (
                                 <div key={i}>
-                                    <div className="flex justify-between text-sm mb-1">
-                                        <span className="text-gray-300">{w.title}</span>
-                                        <span className="font-bold text-red-400">{w.score}%</span>
+                                    <div className="flex justify-between" style={{ fontSize: '13px', marginBottom: '4px' }}>
+                                        <span style={{ color: theme.textSecondary }}>{w.title}</span>
+                                        <span style={{ fontWeight: 700, color: '#ef4444' }}>{w.score}%</span>
                                     </div>
                                     {(w.wrongQuestions || []).map((wq, j) => (
-                                        <div key={j} className="text-xs text-gray-500 pl-3 border-l border-gray-700 ml-1 mb-1">
+                                        <div key={j} style={{ fontSize: '11px', color: theme.textMuted, paddingLeft: '12px', borderLeft: `1px solid ${theme.border}`, marginLeft: '4px', marginBottom: '4px' }}>
                                             ✗ {wq.questionText?.slice(0, 80)}...
                                         </div>
                                     ))}
                                 </div>
                             ))}
                         </div>
-                    ) : <p className="text-gray-500 text-sm">No quiz data yet</p>}
+                    ) : <p style={{ color: theme.textMuted, fontSize: '13px' }}>No quiz data yet</p>}
                 </div>
             </div>
 
-            {/* Topic-by-Topic Breakdown */}
-            <div className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-700">
-                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Topic-by-Topic Breakdown</h3>
+            <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', overflow: 'hidden' }}>
+                <div style={{ padding: '16px 24px', borderBottom: `1px solid ${theme.border}` }}>
+                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0 }}>Topic-by-Topic Breakdown</h3>
                 </div>
-                <div className="divide-y divide-gray-700/50">
+                <div>
                     {(topicBreakdown || []).map(t => (
-                        <div key={t.topicId} className="px-6 py-3 flex items-center gap-4 text-sm">
-                            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${t.status === 'completed' ? 'bg-green-400' : t.status === 'in_progress' ? 'bg-yellow-400' : 'bg-gray-600'}`} />
-                            <div className="flex-1 min-w-0">
-                                <div className="text-white truncate">{t.title}</div>
-                                <div className="text-xs text-gray-500">{t.moduleTitle}</div>
+                        <div key={t.topicId} style={{ padding: '12px 24px', display: 'flex', alignItems: 'center', gap: '16px', fontSize: '13px', borderBottom: `1px solid ${theme.border}50` }}>
+                            <div style={{ width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0, background: t.status === 'completed' ? '#22c55e' : t.status === 'in_progress' ? '#fbbf24' : theme.textMuted }} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ color: theme.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</div>
+                                <div style={{ fontSize: '11px', color: theme.textMuted }}>{t.moduleTitle}</div>
                             </div>
-                            <div className="text-center w-16">
-                                <div className="text-xs text-gray-500">Best</div>
-                                <div className={`font-bold ${(t.bestScore || 0) >= 70 ? 'text-green-400' : 'text-red-400'}`}>{t.bestScore ?? '—'}</div>
+                            <div style={{ textAlign: 'center', width: '64px' }}>
+                                <div style={{ fontSize: '11px', color: theme.textMuted }}>Best</div>
+                                <div style={{ fontWeight: 700, color: (t.bestScore || 0) >= 70 ? '#22c55e' : '#ef4444' }}>{t.bestScore ?? '—'}</div>
                             </div>
-                            <div className="text-center w-16">
-                                <div className="text-xs text-gray-500">Time</div>
-                                <div className="text-gray-300">{t.timeFormatted}</div>
+                            <div style={{ textAlign: 'center', width: '64px' }}>
+                                <div style={{ fontSize: '11px', color: theme.textMuted }}>Time</div>
+                                <div style={{ color: theme.textSecondary }}>{t.timeFormatted}</div>
                             </div>
-                            <div className="text-center w-16">
-                                <div className="text-xs text-gray-500">Res.</div>
-                                <div className="text-gray-300">{t.resourcesCompleted}/{t.totalResources}</div>
+                            <div style={{ textAlign: 'center', width: '64px' }}>
+                                <div style={{ fontSize: '11px', color: theme.textMuted }}>Res.</div>
+                                <div style={{ color: theme.textSecondary }}>{t.resourcesCompleted}/{t.totalResources}</div>
                             </div>
                         </div>
                     ))}
@@ -807,35 +764,49 @@ const StudentDetailView = ({ data, onBack }) => {
 // SHARED COMPONENTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const KPICard = ({ label, value, icon: Icon, color, subtitle }) => (
-    <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 relative overflow-hidden">
-        <div className="absolute top-[-10px] right-[-10px] w-14 h-14 rounded-full" style={{ background: `${color}12` }} />
-        <div className="flex items-start justify-between relative z-10">
-            <div>
-                <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">{label}</p>
-                <p className="text-xl font-bold text-white">{value}</p>
-                {subtitle && <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>}
-            </div>
-            <div className="p-2 rounded-lg" style={{ background: `${color}18`, color }}>
-                <Icon size={18} />
+const KPICard = ({ label, value, icon: Icon, color, subtitle }) => {
+    const { theme } = useT();
+    return (
+        <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '16px', position: 'relative', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', top: '-10px', right: '-10px', width: '56px', height: '56px', borderRadius: '50%', background: `${color}12` }} />
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
+                <div>
+                    <p style={{ fontSize: '11px', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '4px' }}>{label}</p>
+                    <p style={{ fontSize: '20px', fontWeight: 700, color: theme.textPrimary }}>{value}</p>
+                    {subtitle && <p style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>{subtitle}</p>}
+                </div>
+                <div style={{ padding: '8px', borderRadius: '8px', background: `${color}18`, color }}>
+                    <Icon size={18} />
+                </div>
             </div>
         </div>
-    </div>
-);
+    );
+};
 
-const EmptyState = ({ message }) => (
-    <div className="text-center py-16 text-gray-500">
-        <HelpCircle className="w-10 h-10 mx-auto mb-3 text-gray-600" />
-        <p>{message}</p>
-    </div>
-);
+const EmptyState = ({ message }) => {
+    const { theme } = useT();
+    return (
+        <div style={{ textAlign: 'center', padding: '64px 0', color: theme.textMuted }}>
+            <HelpCircle style={{ width: '40px', height: '40px', margin: '0 auto 12px', color: theme.border }} />
+            <p>{message}</p>
+        </div>
+    );
+};
 
-const ErrorState = ({ message, onRetry }) => (
-    <div className="text-center py-16">
-        <AlertTriangle className="w-10 h-10 mx-auto mb-3 text-red-400" />
-        <p className="text-red-400 mb-4">{message}</p>
-        <button onClick={onRetry} className="text-sm text-purple-400 hover:text-purple-300 font-medium">Try again</button>
-    </div>
-);
+const ErrorState = ({ message, onRetry }) => {
+    const { theme, accent } = useT();
+    return (
+        <div style={{ textAlign: 'center', padding: '64px 0' }}>
+            <AlertTriangle style={{ width: '40px', height: '40px', margin: '0 auto 12px', color: '#ef4444' }} />
+            <p style={{ color: '#ef4444', marginBottom: '16px' }}>{message}</p>
+            <button onClick={onRetry}
+                style={{ fontSize: '13px', color: accent.from, background: 'none', border: 'none', cursor: 'pointer', fontWeight: 500, fontFamily: 'inherit' }}
+                onMouseEnter={e => e.currentTarget.style.opacity = '0.7'}
+                onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
+                Try again
+            </button>
+        </div>
+    );
+};
 
 export default TeacherAnalytics;

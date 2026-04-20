@@ -47,7 +47,7 @@ export const useAppTheme = () => {
         try { return localStorage.getItem('sb-theme') || 'dark'; } catch { return 'dark'; }
     });
     const [accentName, setAccentName] = useState(() => {
-        try { return localStorage.getItem('sb-accent') || 'violet'; } catch { return 'violet'; }
+        try { return localStorage.getItem('sb-accent') || 'blue'; } catch { return 'blue'; }
     });
 
     // Sync immediately when localStorage changes (same tab via dispatchEvent OR cross-tab)

@@ -3,7 +3,9 @@ const router = express.Router();
 const auth = require('../middleware/auth');
 const aiAssistant = require('../services/ai-learning-assistant'); // This seems to be a wrapper around ai-service.
 const aiService = require('../services/ai-service'); // Import core service directly for the new simple function
+const { retrieveRelevantChunks } = require('../services/retrievalService');
 const StudentProfile = require('../models/StudentProfile');
+const Course = require('../models/Course');
 const { ActivityLog } = require('../models/Activity');
 
 // ============================================================================
@@ -62,14 +64,83 @@ router.post('/generate-quiz', auth, async (req, res) => {
 // ============================================================================
 // TASK 2.1: On-Demand Topic Quiz
 // ============================================================================
+// Bloom's level map: difficulty or explicit bloomLevel → Bloom's taxonomy key
+const DIFFICULTY_TO_BLOOM = {
+    'easy':         'remember',
+    'Easy':         'remember',
+    'intermediate': 'apply',
+    'Intermediate': 'apply',
+    'hard':         'analyze',
+    'Hard':         'analyze',
+};
+
 router.post('/generate-topic-quiz', auth, async (req, res) => {
     try {
-        const { topicTitle, topicContent, difficulty } = req.body;
-        const quiz = await aiService.generateTopicQuiz(topicTitle, topicContent, difficulty);
+        const {
+            topicTitle,
+            topicContent,
+            difficulty,
+            bloomLevel,
+            numQuestions = 5,
+            courseId,
+            moduleId,
+            topicId,
+        } = req.body;
+
+        // Resolve bloom level: explicit > difficulty mapping > default
+        const resolvedBloom = bloomLevel || DIFFICULTY_TO_BLOOM[difficulty] || 'understand';
+
+        // Fetch course metadata for domain context
+        let courseName = '';
+        let courseField = '';
+        let moduleTitle = '';
+        if (courseId) {
+            try {
+                const course = await Course.findById(courseId).select('title field level modules').lean();
+                if (course) {
+                    courseName = course.title || '';
+                    courseField = course.field || course.title || '';
+                    if (moduleId) {
+                        const mod = course.modules?.find(m => m._id?.toString() === moduleId || m.id === moduleId);
+                        moduleTitle = mod?.title || '';
+                    }
+                }
+            } catch (_) {}
+        }
+
+        // RAG retrieval: use topic + module title as query for better chunk matching
+        let contextText = topicContent || '';
+        if (courseId) {
+            try {
+                const ragQuery = [topicTitle, moduleTitle].filter(Boolean).join(' ');
+                const chunks = await retrieveRelevantChunks({ query: ragQuery, courseId, topK: 10 });
+                if (chunks.length > 0) {
+                    contextText = chunks
+                        .map((c, i) => `[Source: ${c.source}]\n${c.text}`)
+                        .join('\n\n---\n\n');
+                    console.log(`[RAG Quiz] "${topicTitle}" → ${chunks.length} chunks (field: ${courseField})`);
+                } else {
+                    console.log(`[RAG Quiz] No chunks found for course ${courseId} — using generic generation`);
+                }
+            } catch (ragErr) {
+                console.warn('[RAG Quiz] retrieval failed:', ragErr.message);
+            }
+        }
+
+        const quiz = await aiService.generateTopicQuiz(
+            topicTitle,
+            moduleTitle || topicTitle,
+            courseName,
+            courseField,
+            'Intermediate',
+            resolvedBloom,
+            contextText,
+            numQuestions
+        );
         res.json({ questions: quiz });
     } catch (error) {
         console.error('Topic quiz error:', error);
-        res.status(500).json({ error: 'Failed' });
+        res.status(500).json({ error: 'Failed to generate quiz' });
     }
 });
 

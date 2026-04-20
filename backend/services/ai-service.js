@@ -52,7 +52,7 @@ function cleanJSONResponse(text) {
 // ============================================================================
 // callOpenRouter
 // ============================================================================
-async function callOpenRouter(prompt, maxTokens = 4000) {
+async function callOpenRouter(prompt, maxTokens = 4000, temperature = 0.7) {
   if (!OPENROUTER_API_KEY) throw new Error('OpenRouter API key not configured.');
 
   try {
@@ -72,7 +72,7 @@ async function callOpenRouter(prompt, maxTokens = 4000) {
           { role: 'user', content: prompt }
         ],
         max_tokens: maxTokens,
-        temperature: 0.7
+        temperature
       },
       {
         headers: {
@@ -127,19 +127,24 @@ async function generateLearningPath(field, level, goals, quizResults = null) {
     quizContext = `\nDIAGNOSTIC: Score ${score}/${total} (${percentage.toFixed(0)}%). ${instruction}`;
   }
 
-  const prompt = `Create an 8-week learning roadmap for a ${level} student learning ${field}.
+  const prompt = `Create a learning roadmap for a ${level} student learning ${field}.
 Goals: ${goalsText}${quizContext}
 
 Return ONLY valid JSON, no markdown, no extra text.
-
-IMPORTANT: Keep ALL descriptions under 12 words. This is critical to avoid truncation.
+IMPORTANT: Keep ALL descriptions under 12 words. Critical to avoid truncation.
 
 {
   "modules": [
     {
-      "title": "Week 1: Topic Name",
-      "description": "One sentence overview of this week.",
-      "duration": "1 week",
+      "title": "Phase Name (NO Week prefix — e.g. Foundation, Core Concepts, Advanced Patterns)",
+      "description": "One sentence overview under 12 words.",
+      "duration": "Estimated time e.g. 2 weeks",
+      "difficultyLevel": "beginner",
+      "goalStatement": "One sentence: what the student achieves in this phase.",
+      "practiceProjects": [
+        "Build a simple starter project",
+        "Complete a guided hands-on exercise"
+      ],
       "topics": [
         {
           "title": "Short Topic Title",
@@ -156,7 +161,14 @@ IMPORTANT: Keep ALL descriptions under 12 words. This is critical to avoid trunc
   ]
 }
 
-Generate exactly 8 modules. Each module must have exactly 5 topics. Each topic must have exactly 4 subtopics. Field: ${field}, Level: ${level}.`;
+Rules:
+- Generate 5 to 7 phases progressing in difficulty.
+- difficultyLevel must be one of: beginner, intermediate, advanced, expert, production.
+- Phase titles must NOT start with "Week". Use descriptive names.
+- Each phase must have 5 to 8 topics. Each topic must have exactly 4 subtopics.
+- practiceProjects must have 2 to 3 short project ideas per phase.
+- goalStatement is one sentence describing what the student achieves.
+Field: ${field}, Level: ${level}.`;
 
   try {
     const response = await callOpenRouter(prompt, 8000);
@@ -172,35 +184,59 @@ Generate exactly 8 modules. Each module must have exactly 5 topics. Each topic m
 
   } catch (error) {
     console.error('❌ generateLearningPath failed:', error.message);
-    // Fallback with proper subtopics structure so UI doesn't break
-    return {
-      modules: Array.from({ length: 4 }, (_, i) => ({
-        title: `Week ${i + 1}: ${field} Foundations`,
-        description: `Core ${field} concepts for week ${i + 1}.`,
-        duration: '1 week',
-        topics: [
-          {
-            title: 'Core Concepts',
-            description: 'Fundamental ideas and terminology.',
-            subtopics: [
-              { title: 'Introduction', description: 'Overview and context' },
-              { title: 'Key Terms', description: 'Essential vocabulary to know' },
-              { title: 'Core Principles', description: 'Foundational rules and patterns' },
-              { title: 'Quick Reference', description: 'Summary and cheat sheet' }
-            ]
-          },
-          {
-            title: 'Hands-on Practice',
-            description: 'Apply concepts through exercises.',
-            subtopics: [
-              { title: 'Guided Exercise', description: 'Follow along with examples' },
-              { title: 'Mini Project', description: 'Build something from scratch' },
-              { title: 'Common Mistakes', description: 'Pitfalls and how to avoid them' },
-              { title: 'Self Assessment', description: 'Check your understanding' }
-            ]
-          }
+    // Fallback with phase-based structure so UI doesn't break
+    const fallbackTopics = (label) => ([
+      {
+        title: 'Core Concepts',
+        description: 'Fundamental ideas and terminology.',
+        subtopics: [
+          { title: 'Introduction', description: 'Overview and context' },
+          { title: 'Key Terms', description: 'Essential vocabulary to know' },
+          { title: 'Core Principles', description: 'Foundational rules and patterns' },
+          { title: 'Quick Reference', description: 'Summary and cheat sheet' }
         ]
-      }))
+      },
+      {
+        title: 'Hands-on Practice',
+        description: 'Apply concepts through exercises.',
+        subtopics: [
+          { title: 'Guided Exercise', description: 'Follow along with examples' },
+          { title: 'Mini Project', description: 'Build something from scratch' },
+          { title: 'Common Mistakes', description: 'Pitfalls and how to avoid them' },
+          { title: 'Self Assessment', description: 'Check your understanding' }
+        ]
+      }
+    ]);
+    return {
+      modules: [
+        {
+          title: 'Foundation',
+          description: `Core ${field} fundamentals and setup.`,
+          duration: '2 weeks',
+          difficultyLevel: 'beginner',
+          goalStatement: `Understand the basics of ${field} and set up your environment.`,
+          practiceProjects: ['Build a starter project', 'Complete a guided exercise'],
+          topics: fallbackTopics('foundation')
+        },
+        {
+          title: 'Core Concepts',
+          description: `Essential ${field} patterns and principles.`,
+          duration: '2 weeks',
+          difficultyLevel: 'intermediate',
+          goalStatement: `Apply core ${field} patterns with confidence.`,
+          practiceProjects: ['Build an intermediate project', 'Solve practice exercises'],
+          topics: fallbackTopics('core')
+        },
+        {
+          title: 'Advanced Application',
+          description: `Advanced ${field} techniques and real projects.`,
+          duration: '2 weeks',
+          difficultyLevel: 'advanced',
+          goalStatement: `Build production-ready ${field} projects independently.`,
+          practiceProjects: ['Build a real-world project', 'Code review and refactor'],
+          topics: fallbackTopics('advanced')
+        }
+      ]
     };
   }
 }
@@ -284,47 +320,78 @@ Return ONLY a valid JSON array. No markdown.
 // ============================================================================
 // generateTopicQuiz
 // ============================================================================
-async function generateTopicQuiz(topic, className, level, bloomLevel = 'understand', contextText = '') {
-  const prompt = `Generate 10 multiple-choice questions on "${topic}" for "${className}" (${level} level, ${bloomLevel} Bloom's level).
-Context: ${contextText}
-Return ONLY a valid JSON array. No markdown.
+const BLOOM_DESCRIPTIONS = {
+  remember:   'recall facts, definitions, and basic concepts — "What is...?", "List...", "Define..."',
+  understand: 'explain ideas in own words, summarize, classify — "Explain...", "What does X mean?", "How does X work?"',
+  apply:      'use knowledge to solve problems — "Write code that...", "Implement...", "How would you fix...?"',
+  analyze:    'break down concepts, compare, distinguish — "Why does X happen?", "What is the difference between X and Y?", "Identify the problem in..."',
+  evaluate:   'judge, critique, justify choices — "Which approach is better and why?", "What are the trade-offs of...?"',
+  create:     'design or construct something new — "Design a...", "How would you architect...?", "Write a solution for..."'
+};
 
+async function generateTopicQuiz(topic, moduleName, className, subjectField, level, bloomLevel = 'understand', contextText = '', numQuestions = 10) {
+  const bloomDesc = BLOOM_DESCRIPTIONS[bloomLevel] || BLOOM_DESCRIPTIONS.understand;
+  const hasContext = contextText && contextText.trim().length > 50;
+
+  const contextSection = hasContext
+    ? `\n\nCOURSE MATERIAL CONTEXT (use this as the primary source for question content):\n"""\n${contextText.substring(0, 3000)}\n"""`
+    : '';
+
+  const prompt = `You are writing a quiz. Generate exactly ${numQuestions} multiple-choice questions ONLY about the topic below.
+
+SUBJECT: ${subjectField}
+COURSE: ${className}
+MODULE: ${moduleName}
+TOPIC: ${topic}
+BLOOM LEVEL: ${bloomLevel} (${bloomDesc})${contextSection}
+
+STRICT RULES:
+1. Every question must test knowledge of "${topic}" specifically — not the module, not the course, not any other topic.
+2. Do NOT use "${topic}" literally in the question if its meaning depends on context; instead write questions that make the subject area clear from the question itself.
+3. Every question must match the Bloom's level "${bloomLevel}": ${bloomDesc}.
+4. If course material is provided above, derive questions from it. Otherwise use your knowledge of "${topic}" in ${subjectField}.
+
+Return ONLY a valid JSON array, no markdown:
 [
   {
-    "question": "Question text",
+    "question": "...",
     "code": "",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
-    "correctAnswer": "Option A",
-    "explanation": "Brief explanation under 20 words.",
+    "options": ["A) ...", "B) ...", "C) ...", "D) ..."],
+    "correctAnswer": "A) ...",
+    "explanation": "One sentence explanation.",
     "hint": "Short hint.",
+    "bloomLevel": "${bloomLevel}",
     "difficulty": 5
   }
 ]`;
 
   try {
-    const response = await callOpenRouter(prompt, 6000);
+    const response = await callOpenRouter(prompt, 6000, 0.4);
     const cleaned = cleanJSONResponse(response);
     const questions = JSON.parse(cleaned);
     if (!Array.isArray(questions)) throw new Error('Not an array');
-    console.log(`✅ generateTopicQuiz: got ${questions.length} questions`);
-    return questions.map((q, i) => ({
+    const sliced = questions.slice(0, numQuestions);
+    console.log(`✅ generateTopicQuiz: got ${questions.length} questions (returning ${sliced.length})`);
+    return sliced.map((q, i) => ({
       question: q.question || `Question ${i + 1}`,
       code: q.code || '',
       options: Array.isArray(q.options) ? q.options.slice(0, 4) : ['A', 'B', 'C', 'D'],
       correctAnswer: q.correctAnswer || (q.options ? q.options[0] : 'A'),
       explanation: q.explanation || 'No explanation provided.',
       hint: q.hint || 'No hint available.',
+      bloomLevel: q.bloomLevel || bloomLevel,
       difficulty: q.difficulty || 5
     }));
   } catch (error) {
     console.error('❌ generateTopicQuiz failed:', error.message);
     return Array.from({ length: 5 }, (_, i) => ({
-      question: `Fallback Q${i + 1}: Key concept in ${topic}?`,
+      question: `Fallback Q${i + 1}: Key concept in ${topic} (${subjectField})?`,
       code: '',
       options: ['Concept A', 'Concept B', 'Concept C', 'Concept D'],
       correctAnswer: 'Concept A',
       explanation: 'Fallback — AI unavailable.',
       hint: 'Select the first option.',
+      bloomLevel: bloomLevel,
       difficulty: 1
     }));
   }
@@ -383,14 +450,21 @@ function getAssessmentFallback() {
 }
 
 // ============================================================================
-// generateTopicStepPlan  ← topic-wise step-by-step learning plan
+// generateTopicStepPlan  ← topic-wise step-by-step learning plan (teacher-grade)
 // ============================================================================
 async function generateTopicStepPlan(field, level, topicTitle, moduleTitle, subtopics = []) {
-  const subtopicsText = subtopics.map(s => s.title).filter(Boolean).join(', ') || topicTitle;
+  const subtopicList = subtopics.length > 0
+    ? subtopics.map((s, i) => `${i + 1}. "${s.title}"${s.description ? ` — ${s.description}` : ''}`).join('\n')
+    : `1. "${topicTitle} Basics"\n2. "Key Concepts"\n3. "Practical Application"\n4. "Best Practices"`;
 
-  const prompt = `Create a detailed step-by-step learning plan for the topic "${topicTitle}" \
-(module: "${moduleTitle}") for a ${level} learner studying ${field}.
-Subtopics to cover: ${subtopicsText}
+  const stepCount = subtopics.length > 0 ? subtopics.length : 4;
+
+  const prompt = `You are a senior ${field} instructor with 10+ years of teaching experience. \
+Create a rich, classroom-quality learning plan for the topic "${topicTitle}" (module: "${moduleTitle}") \
+for a ${level} learner in ${field}.
+
+Generate EXACTLY ${stepCount} steps — one per subtopic listed:
+${subtopicList}
 
 Return ONLY valid JSON. No markdown, no extra text.
 
@@ -404,41 +478,61 @@ Return ONLY valid JSON. No markdown, no extra text.
   "steps": [
     {
       "stepNumber": 1,
-      "title": "Step title (max 8 words)",
-      "explanation": "2 sentence explanation of what to learn and why it matters.",
-      "action": "Specific action: e.g. Watch the video, Read the docs, Build a mini-project, Complete the exercise.",
-      "estimatedTime": "20 min",
+      "title": "EXACT subtopic title from the list",
+      "explanation": "3-4 sentences: what this concept is, WHY it matters in real projects, and how it connects to ${topicTitle} as a whole. Be specific and concrete.",
+      "teacherNote": "One insider tip, gotcha, or best-practice observation that only an experienced ${field} practitioner would know. Start with 'Pro tip:' or 'Watch out:'.",
+      "exampleCode": "A minimal, self-contained code snippet demonstrating this concept. Use empty string if not code-related.",
+      "exampleExplanation": "2-3 sentences walking through what the example shows and why it was written that way.",
+      "keyPoints": [
+        "First key concept or fact to remember",
+        "Second key concept or fact to remember",
+        "Third key concept or fact to remember"
+      ],
+      "commonMistake": "One sentence: the single most common mistake ${level} learners make on this subtopic and how to avoid it.",
+      "action": "A concrete, hands-on task the student should do right now (build something, modify an example, answer a question).",
+      "estimatedTime": "25 min",
       "resources": [
-        { "type": "youtube", "title": "Resource title", "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ" },
-        { "type": "article", "title": "Resource title", "url": "https://developer.mozilla.org" }
+        { "type": "youtube", "title": "Descriptive video title", "url": "https://www.youtube.com/results?search_query=SEARCH_TERMS" },
+        { "type": "article", "title": "Official docs or quality guide title", "url": "https://developer.mozilla.org" },
+        { "type": "practice", "title": "Practice exercise or playground title", "url": "https://jsfiddle.net" }
       ]
     }
   ]
 }
 
-Requirements:
-- Exactly 5 to 6 steps that progress logically from understanding to hands-on practice
-- Each step must have exactly 2 resources with real, working URLs (YouTube videos or authoritative articles)
-- objectives: exactly 3 clear, actionable learning outcomes starting with "Student will"
-- estimatedTime per step: realistic (10-30 min range)
-- Keep explanation under 2 sentences
+Rules:
+- Exactly ${stepCount} steps, one per subtopic, in order.
+- Each step title must match the subtopic title exactly.
+- explanation: 3-4 sentences, specific and concrete — not generic filler.
+- teacherNote: one sentence of genuine practitioner wisdom.
+- exampleCode: real minimal code (empty string if non-code topic).
+- exampleExplanation: 2-3 sentences explaining the example.
+- keyPoints: exactly 3 short bullet facts.
+- commonMistake: one actionable sentence.
+- resources: exactly 3 (youtube, article/docs, practice/playground).
+- objectives: exactly 3 outcomes starting with "Student will".
 Field: ${field}, Level: ${level}, Topic: ${topicTitle}`;
 
   try {
-    const response = await callOpenRouter(prompt, 5000);
+    const response = await callOpenRouter(prompt, 8000);
     const cleaned = cleanJSONResponse(response);
     const plan = JSON.parse(cleaned);
 
     if (!plan.steps || plan.steps.length === 0) throw new Error('No steps in response');
 
-    plan.steps = plan.steps.slice(0, 6).map((s, i) => ({
+    plan.steps = plan.steps.map((s, i) => ({
       stepNumber: i + 1,
-      title: s.title || `Step ${i + 1}`,
+      title: s.title || (subtopics[i]?.title) || `Subtopic ${i + 1}`,
       explanation: s.explanation || '',
+      teacherNote: s.teacherNote || '',
+      exampleCode: s.exampleCode || '',
+      exampleExplanation: s.exampleExplanation || '',
+      keyPoints: Array.isArray(s.keyPoints) ? s.keyPoints.slice(0, 3) : [],
+      commonMistake: s.commonMistake || '',
       action: s.action || '',
-      estimatedTime: s.estimatedTime || '15 min',
+      estimatedTime: s.estimatedTime || '25 min',
       completed: false,
-      resources: Array.isArray(s.resources) ? s.resources.slice(0, 2).map(r => ({
+      resources: Array.isArray(s.resources) ? s.resources.slice(0, 3).map(r => ({
         type: (r.type || 'article').toLowerCase(),
         title: r.title || 'Resource',
         url: r.url || '#'
@@ -446,57 +540,47 @@ Field: ${field}, Level: ${level}, Topic: ${topicTitle}`;
     }));
 
     plan.objectives = Array.isArray(plan.objectives) ? plan.objectives.slice(0, 3) : [];
-    plan.estimatedTime = plan.estimatedTime || '2 hours';
+    plan.estimatedTime = plan.estimatedTime || `${stepCount * 25} min`;
 
-    console.log(`✅ generateTopicStepPlan: ${plan.steps.length} steps for "${topicTitle}"`);
+    console.log(`✅ generateTopicStepPlan: ${plan.steps.length} subtopic steps for "${topicTitle}"`);
     return plan;
   } catch (error) {
     console.error('❌ generateTopicStepPlan failed:', error.message);
+    const fallbackSubtopics = subtopics.length > 0 ? subtopics : [
+      { title: 'Introduction', description: 'Overview and context' },
+      { title: 'Core Concepts', description: 'Key ideas and terminology' },
+      { title: 'Practical Application', description: 'Hands-on exercises' },
+      { title: 'Best Practices', description: 'Tips and common patterns' }
+    ];
     return {
       objectives: [
         `Student will be able to explain core concepts of ${topicTitle}`,
         `Student will be able to apply ${topicTitle} in practical scenarios`,
         `Student will understand best practices for ${topicTitle}`
       ],
-      estimatedTime: '2 hours',
-      steps: [
-        {
-          stepNumber: 1,
-          title: 'Understand the Fundamentals',
-          explanation: `Learn the core concepts behind ${topicTitle} and why they matter in ${field}.`,
-          action: 'Read the official documentation or an introductory article.',
-          estimatedTime: '20 min',
-          completed: false,
-          resources: [
-            { type: 'article', title: `Introduction to ${topicTitle}`, url: 'https://developer.mozilla.org' },
-            { type: 'youtube', title: `${topicTitle} Explained`, url: 'https://www.youtube.com/results?search_query=' + encodeURIComponent(topicTitle) }
-          ]
-        },
-        {
-          stepNumber: 2,
-          title: 'Study Key Concepts',
-          explanation: `Explore the most important ideas and patterns within ${topicTitle}.`,
-          action: 'Watch a tutorial video and take notes on key patterns.',
-          estimatedTime: '30 min',
-          completed: false,
-          resources: [
-            { type: 'youtube', title: `${topicTitle} Tutorial`, url: 'https://www.youtube.com/results?search_query=' + encodeURIComponent(topicTitle + ' tutorial') },
-            { type: 'article', title: `${topicTitle} Guide`, url: 'https://www.freecodecamp.org' }
-          ]
-        },
-        {
-          stepNumber: 3,
-          title: 'Practice with Examples',
-          explanation: `Reinforce your understanding by working through real-world examples.`,
-          action: 'Complete 2-3 practice exercises or code challenges.',
-          estimatedTime: '40 min',
-          completed: false,
-          resources: [
-            { type: 'article', title: `${topicTitle} Examples`, url: 'https://www.w3schools.com' },
-            { type: 'article', title: `${topicTitle} Exercises`, url: 'https://exercism.org' }
-          ]
-        }
-      ]
+      estimatedTime: `${fallbackSubtopics.length * 25} min`,
+      steps: fallbackSubtopics.map((sub, i) => ({
+        stepNumber: i + 1,
+        title: sub.title,
+        explanation: `${sub.description || `Learn about ${sub.title} within the context of ${topicTitle}.`} This is a key part of mastering ${topicTitle} in ${field}. Understanding this well will directly improve your ability to write production-quality code.`,
+        teacherNote: `Pro tip: Always connect what you learn here back to a real project. Abstract knowledge without application fades quickly.`,
+        exampleCode: '',
+        exampleExplanation: `This example illustrates the core idea behind ${sub.title}. Study it carefully before attempting the action step.`,
+        keyPoints: [
+          `${sub.title} is foundational for understanding ${topicTitle}`,
+          `Apply this concept in small experiments before using it in larger projects`,
+          `Review official documentation alongside tutorials for accurate mental models`
+        ],
+        commonMistake: `Beginners often skip practicing ${sub.title} hands-on — passive reading is not enough; you must write code to internalize it.`,
+        action: `Build a minimal example demonstrating ${sub.title} from scratch without copying — then explain it back in your own words.`,
+        estimatedTime: '25 min',
+        completed: false,
+        resources: [
+          { type: 'youtube', title: `${sub.title} – ${topicTitle} Tutorial`, url: 'https://www.youtube.com/results?search_query=' + encodeURIComponent(`${sub.title} ${topicTitle} ${level} tutorial`) },
+          { type: 'article', title: `${sub.title} — MDN Docs`, url: 'https://developer.mozilla.org/en-US/search?q=' + encodeURIComponent(`${sub.title} ${topicTitle}`) },
+          { type: 'practice', title: `Practice: ${sub.title}`, url: 'https://www.google.com/search?q=' + encodeURIComponent(`${sub.title} ${topicTitle} exercises`) }
+        ]
+      }))
     };
   }
 }

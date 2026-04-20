@@ -25,6 +25,8 @@ router.get('/student/enrolled-classes', auth, courseController.getEnrolledClasse
 router.post('/class-progress', auth, courseController.updateClassProgress); // Update tracking for class
 router.post('/path/toggle-topic', auth, courseController.toggleTopicComplete);
 router.post('/path/toggle-step', auth, courseController.toggleStepComplete);
+router.post('/path/submit-ai-quiz', auth, courseController.submitAiPathQuiz);
+router.post('/path/refresh-plan', auth, courseController.refreshTopicPlan);
 router.post('/generate-resource-quiz', auth, courseController.generateResourceQuiz); // Generate quiz from resource
 
 module.exports = router;
