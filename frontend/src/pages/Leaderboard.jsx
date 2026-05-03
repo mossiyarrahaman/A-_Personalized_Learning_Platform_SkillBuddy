@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Trophy, Medal, Flame, Shield, Star, Zap, Target, Crown, TrendingUp } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Trophy, Medal, Flame, Shield, Star, Zap, Target, Crown, TrendingUp, RefreshCw, BookOpen } from 'lucide-react';
 import api from '../api/axios';
 import { useAppTheme } from '../hooks/useAppTheme';
 
@@ -8,11 +8,29 @@ const Leaderboard = () => {
     const [leaderboard, setLeaderboard] = useState([]);
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
     const [filter, setFilter] = useState('all'); // all | streak | badges
 
-    useEffect(() => { fetchData(); }, []);
+    useEffect(() => {
+        fetchData();
 
-    const fetchData = async () => {
+        // Refresh when quiz completion awards points
+        const onPointsUpdated = () => fetchData(true);
+        window.addEventListener('points-updated', onPointsUpdated);
+
+        // Refresh when user returns to this tab
+        const onVisibility = () => { if (document.visibilityState === 'visible') fetchData(true); };
+        document.addEventListener('visibilitychange', onVisibility);
+
+        return () => {
+            window.removeEventListener('points-updated', onPointsUpdated);
+            document.removeEventListener('visibilitychange', onVisibility);
+        };
+    }, []);
+
+    const fetchData = async (silent = false) => {
+        if (!silent) setLoading(true);
+        else setRefreshing(true);
         try {
             const [lbRes, myRes] = await Promise.all([
                 api.get('/gamification/leaderboard'),
@@ -24,6 +42,7 @@ const Leaderboard = () => {
             console.error('Leaderboard fetch error', err);
         } finally {
             setLoading(false);
+            setRefreshing(false);
         }
     };
 
@@ -65,8 +84,13 @@ const Leaderboard = () => {
                             <Trophy size={22} style={{ color: accent.from }} />
                         </div>
                         <div>
-                            <h1 style={{ fontFamily: "'Sora',sans-serif", fontSize: '1.6rem', fontWeight: 800, color: theme.textPrimary, lineHeight: 1 }}>Leaderboard</h1>
-                            <p style={{ fontSize: '13px', color: theme.textMuted, marginTop: '3px' }}>{leaderboard.length} learners competing this week</p>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <h1 style={{ fontFamily: "'Sora',sans-serif", fontSize: '1.6rem', fontWeight: 800, color: theme.textPrimary, lineHeight: 1 }}>Leaderboard</h1>
+                                <button onClick={() => fetchData(true)} title="Refresh" style={{ background: 'none', border: 'none', cursor: 'pointer', color: theme.textMuted, display: 'flex', padding: '4px', borderRadius: '6px' }}>
+                                    <RefreshCw size={15} style={{ animation: refreshing ? 'spin .7s linear infinite' : 'none', color: refreshing ? accent.from : theme.textMuted }} />
+                                </button>
+                            </div>
+                            <p style={{ fontSize: '13px', color: theme.textMuted, marginTop: '3px' }}>{leaderboard.length} learners competing</p>
                         </div>
                     </div>
 
@@ -200,11 +224,11 @@ const Leaderboard = () => {
                             </div>
                             <div style={{ padding: '12px' }}>
                                 {[
-                                    [Crown, 'Complete a module', 100, '#fbbf24'],
-                                    [Zap, 'Finish a quiz', 50, accent.from],
-                                    [Flame, 'Daily login streak', 10, '#f97316'],
-                                    [Target, 'Answer a doubt', 20, '#34d399'],
-                                    [TrendingUp, 'Complete AI path topic', 15, '#a78bfa'],
+                                    [Zap, 'Pass a quiz (≥70%)', 50, accent.from],
+                                    [Crown, 'Complete a course', 200, '#fbbf24'],
+                                    [Target, 'Quiz attempt', 10, '#34d399'],
+                                    [BookOpen, 'Complete a resource', 10, '#a78bfa'],
+                                    [Flame, 'Study time (per 5 min)', 1, '#f97316'],
                                 ].map(([Icon, text, pts, color]) => (
                                     <div key={text} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 10px', borderRadius: '10px', transition: 'background .15s', cursor: 'default' }}
                                         onMouseEnter={e => e.currentTarget.style.background = `${color}10`}

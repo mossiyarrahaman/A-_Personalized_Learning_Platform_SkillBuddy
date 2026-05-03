@@ -84,6 +84,28 @@ exports.login = async (req, res) => {
 
         const token = createToken(user._id);
 
+        // Update daily streak for students
+        if (user.role === 'student') {
+            try {
+                const StudentProfile = require('../models/StudentProfile');
+                const profile = await StudentProfile.findOne({ userId: user._id });
+                if (profile) {
+                    const now = new Date();
+                    const last = profile.lastActiveDate ? new Date(profile.lastActiveDate) : null;
+                    const daysDiff = last
+                        ? Math.floor((now.setHours(0,0,0,0) - new Date(last).setHours(0,0,0,0)) / 86400000)
+                        : 1;
+                    if (daysDiff === 1) {
+                        profile.streak = (profile.streak || 0) + 1;
+                    } else if (daysDiff > 1) {
+                        profile.streak = 1;
+                    }
+                    profile.lastActiveDate = new Date();
+                    await profile.save();
+                }
+            } catch (e) { /* don't fail login on streak error */ }
+        }
+
         res.json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
 
     } catch (error) {
@@ -173,6 +195,36 @@ exports.getAllStudents = async (req, res) => {
     }
 };
 
+exports.getEnrolledStudents = async (req, res) => {
+    try {
+        const Course = require('../models/Course');
+        const courses = await Course.find({ author: req.user.id }).select('enrolledStudents title').lean();
+
+        const studentCourses = {};
+        for (const course of courses) {
+            for (const sid of (course.enrolledStudents || [])) {
+                const key = sid.toString();
+                if (!studentCourses[key]) studentCourses[key] = [];
+                studentCourses[key].push({ courseId: course._id.toString(), title: course.title });
+            }
+        }
+
+        const studentIds = Object.keys(studentCourses);
+        if (studentIds.length === 0) return res.json({ students: [] });
+
+        const users = await User.find({ _id: { $in: studentIds }, role: 'student' }).select('-password -otp -otpExpiry -otpAttempts').lean();
+        const result = users.map(u => ({
+            ...u,
+            enrolledCourseDetails: studentCourses[u._id.toString()] || [],
+            enrolledCourses: (studentCourses[u._id.toString()] || []).map(c => c.title),
+        }));
+        res.json({ students: result });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Server error fetching enrolled students' });
+    }
+};
+
 
 exports.forgotPassword = async (req, res) => {
     try {
@@ -225,6 +277,37 @@ exports.changePassword = async (req, res) => {
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Server error.' });
+    }
+};
+
+exports.updateProfile = async (req, res) => {
+    try {
+        const { name, title, bio, location, institution, website, skills, tags, avatarGradIdx } = req.body;
+        if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
+        const updated = await User.findByIdAndUpdate(
+            req.user.id,
+            { name: name.trim(), title, bio, location, institution, website, skills, tags, avatarGradIdx, updatedAt: new Date() },
+            { new: true, runValidators: true }
+        ).select('-password -otp -otpExpiry -otpAttempts');
+        res.json({ user: updated });
+    } catch (err) {
+        console.error('updateProfile error:', err);
+        res.status(500).json({ error: 'Failed to update profile' });
+    }
+};
+
+exports.getTeacherStats = async (req, res) => {
+    try {
+        const Course = require('../models/Course');
+        const Doubt = require('../models/Doubt');
+        const courses = await Course.find({ author: req.user.id }).select('enrolledStudents').lean();
+        const totalStudents = courses.reduce((sum, c) => sum + (c.enrolledStudents?.length || 0), 0);
+        const doubtsAnswered = await Doubt.countDocuments({ 'answers.responderId': req.user.id });
+        const user = await User.findById(req.user.id).select('createdAt').lean();
+        res.json({ totalCourses: courses.length, totalStudents, doubtsAnswered, memberSince: user.createdAt });
+    } catch (err) {
+        console.error('getTeacherStats error:', err);
+        res.status(500).json({ error: 'Failed to load stats' });
     }
 };
 

@@ -48,6 +48,7 @@ function App() {
             <Route path="/my-courses" element={<MyCourses />} />
             <Route path="/class/:courseId" element={<ClassView />} />
             <Route path="/ai-path" element={<AIPathCurriculum />} />
+            <Route path="/ai-path/:pathId" element={<AIPathCurriculum />} />
             <Route path="/ai-course/module/:moduleId/topic/:topicId" element={<CourseView />} />
             <Route path="/profile" element={<ProfileSettings />} /> {/* ← ADD THIS */}
           </Route>

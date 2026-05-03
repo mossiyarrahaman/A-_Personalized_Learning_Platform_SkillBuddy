@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
     ChevronLeft, ChevronRight, Code, Zap, Globe, Database,
     Layout, Server, Smartphone, Cloud, Terminal, Cpu,
@@ -65,6 +65,8 @@ const ProgressBar = ({ step, totalSteps }) => {
 
 const Onboarding = () => {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const isAddMode = searchParams.get('mode') === 'add';
     const [step, setStep] = useState(1);
     const [data, setData] = useState({ field: null, level: null, goals: [] });
     const [quizQuestions, setQuizQuestions] = useState([]);
@@ -165,8 +167,13 @@ const Onboarding = () => {
                 quizResults: quizResultSummary
             };
 
-            await api.post('/courses/generate-path', payload);
-            navigate('/dashboard');
+            if (isAddMode) {
+                await api.post('/courses/paths', payload);
+                navigate('/my-courses');
+            } else {
+                await api.post('/courses/generate-path', payload);
+                navigate('/dashboard');
+            }
         } catch (error) {
             console.error(error);
             alert('Failed to generate learning path. Please try again.');
@@ -428,13 +435,24 @@ const Onboarding = () => {
 
             {/* Header / Nav */}
             <div className="w-full p-6 flex justify-between items-center max-w-7xl mx-auto z-10 relative">
-                <div className="text-2xl font-bold tracking-tighter flex items-center gap-2" onClick={() => navigate('/')} style={{ cursor: 'pointer' }}>
-                    <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-blue-500 to-purple-500"></div>
-                    SkillBuddy
+                <div className="flex items-center gap-4">
+                    {isAddMode && (
+                        <button
+                            onClick={() => navigate('/my-courses')}
+                            className="flex items-center gap-1 text-sm font-medium text-gray-400 hover:text-white transition-colors"
+                        >
+                            <ChevronLeft size={18} />
+                            Back
+                        </button>
+                    )}
+                    <div className="text-2xl font-bold tracking-tighter flex items-center gap-2" onClick={() => navigate('/')} style={{ cursor: 'pointer' }}>
+                        <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-blue-500 to-purple-500"></div>
+                        SkillBuddy
+                    </div>
                 </div>
                 {step > 1 && step < 6 && (
-                    <button onClick={() => navigate('/dashboard')} className="text-sm font-medium text-gray-500 hover:text-white transition-colors">
-                        Skip to Dashboard
+                    <button onClick={() => navigate(isAddMode ? '/my-courses' : '/dashboard')} className="text-sm font-medium text-gray-500 hover:text-white transition-colors">
+                        {isAddMode ? 'Back to My Learning' : 'Skip to Dashboard'}
                     </button>
                 )}
             </div>

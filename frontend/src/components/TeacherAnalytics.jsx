@@ -1,6 +1,6 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import {
-    BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+    BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
     CartesianGrid, PieChart, Pie, Cell,
     RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
     Area, AreaChart
@@ -9,7 +9,7 @@ import {
     Loader, Users, AlertTriangle, Brain, Trophy, Clock,
     ChevronRight, ArrowLeft, TrendingUp, Target,
     BookOpen, HelpCircle, Eye, Activity, Zap,
-    CheckCircle, XCircle
+    CheckCircle, XCircle, Grid, BarChart3
 } from 'lucide-react';
 import api from '../api/axios';
 import { useAppTheme } from '../hooks/useAppTheme';
@@ -38,6 +38,63 @@ const ATTENTION_STYLES = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// TEACHER QUIZ RESULTS VIEW
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const TeacherQuizView = ({ data }) => {
+    const { theme, accent } = useT();
+    const aGrad = `linear-gradient(135deg,${accent.from},${accent.to})`;
+    const { topics = [] } = data;
+
+    if (topics.length === 0) return (
+        <EmptyState message="No teacher quiz attempts yet. Publish a quiz and have students take it." />
+    );
+
+    return (
+        <div className="space-y-4">
+            {topics.map(t => {
+                const passRate = t.attemptedCount > 0 ? Math.round((t.passCount / t.attemptedCount) * 100) : 0;
+                const scoreColor = (t.avgScore || 0) >= 80 ? '#22c55e' : (t.avgScore || 0) >= 60 ? '#fbbf24' : '#ef4444';
+                return (
+                    <div key={t.topicId} style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '14px', overflow: 'hidden' }}>
+                        <div style={{ padding: '14px 18px', background: theme.bg, borderBottom: `1px solid ${theme.border}`, display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: '13px', fontWeight: 700, color: theme.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</div>
+                                <div style={{ fontSize: '11px', color: theme.textMuted }}>{t.moduleTitle}</div>
+                            </div>
+                            {[
+                                { label: 'Attempted', val: t.attemptedCount, color: accent.from },
+                                { label: 'Passed', val: t.passCount, color: '#22c55e' },
+                                { label: 'Failed', val: t.failCount, color: '#ef4444' },
+                                { label: 'Pass Rate', val: `${passRate}%`, color: passRate >= 80 ? '#22c55e' : passRate >= 60 ? '#fbbf24' : '#ef4444' },
+                                { label: 'Avg Score', val: t.avgScore !== null ? `${t.avgScore}%` : '—', color: scoreColor },
+                            ].map(chip => (
+                                <div key={chip.label} style={{ textAlign: 'center', minWidth: '56px', flexShrink: 0 }}>
+                                    <div style={{ fontSize: '15px', fontWeight: 700, color: chip.color }}>{chip.val}</div>
+                                    <div style={{ fontSize: '10px', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{chip.label}</div>
+                                </div>
+                            ))}
+                        </div>
+                        {t.students.length === 0 ? (
+                            <div style={{ padding: '14px 18px', fontSize: '13px', color: theme.textMuted, textAlign: 'center' }}>No attempts yet.</div>
+                        ) : t.students.map((s, i) => (
+                            <div key={String(s.studentId)} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 18px', borderBottom: i < t.students.length - 1 ? `1px solid ${theme.border}40` : 'none' }}>
+                                <div style={{ flex: 1, fontSize: '13px', fontWeight: 500, color: theme.textPrimary }}>{s.name}</div>
+                                <span style={{ fontSize: '11px', color: theme.textMuted }}>{s.attempts} attempt{s.attempts !== 1 ? 's' : ''}</span>
+                                <span style={{ fontSize: '13px', fontWeight: 700, color: s.bestScore >= 80 ? '#22c55e' : '#ef4444', minWidth: '44px', textAlign: 'right' }}>{s.bestScore}%</span>
+                                <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 9px', borderRadius: '99px', background: s.passed ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.10)', color: s.passed ? '#22c55e' : '#ef4444', border: `1px solid ${s.passed ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.25)'}` }}>
+                                    {s.passed ? '✓ Passed' : '✗ Failed'}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                );
+            })}
+        </div>
+    );
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -48,7 +105,6 @@ const TeacherAnalytics = ({ courses = [] }) => {
         contentStyle: { backgroundColor: theme.surface, borderColor: theme.border, borderRadius: '12px', color: theme.textPrimary, fontSize: '13px' },
         cursor: { fill: `${accent.from}14` },
     };
-    const ctxValue = { theme, accent, aGrad, tooltipStyle };
 
     const safeCourses = Array.isArray(courses) ? courses : [];
     const [selectedCourse, setSelectedCourse] = useState(safeCourses[0]?._id || '');
@@ -58,6 +114,8 @@ const TeacherAnalytics = ({ courses = [] }) => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
 
+    const ctxValue = { theme, accent, aGrad, tooltipStyle, courseId: selectedCourse };
+
     useEffect(() => {
         if (!selectedCourse && safeCourses.length > 0) setSelectedCourse(safeCourses[0]._id);
     }, [safeCourses.length]);
@@ -65,7 +123,10 @@ const TeacherAnalytics = ({ courses = [] }) => {
     const views = [
         { id: 'overview', label: 'Overview', icon: Activity },
         { id: 'topics', label: 'Topics', icon: BookOpen },
+        { id: 'teacher-quiz', label: 'Teacher Quizzes', icon: CheckCircle },
         { id: 'quiz-analysis', label: 'Quiz Forensics', icon: Brain },
+        { id: 'performance', label: 'Performance', icon: BarChart3 },
+        { id: 'topic-progress', label: 'Topic Progress', icon: Grid },
         { id: 'leaderboard', label: 'Leaderboard', icon: Trophy },
         { id: 'at-risk', label: 'At-Risk', icon: AlertTriangle },
         { id: 'engagement', label: 'Engagement', icon: TrendingUp },
@@ -79,12 +140,15 @@ const TeacherAnalytics = ({ courses = [] }) => {
             const endpoints = {
                 overview: `/analytics/${selectedCourse}/overview`,
                 topics: `/analytics/${selectedCourse}/topics`,
+                'teacher-quiz': `/analytics/${selectedCourse}/teacher-quiz-results`,
                 'quiz-analysis': `/analytics/${selectedCourse}/quiz-analysis`,
+                performance: `/analytics/${selectedCourse}/overview`,
+                'topic-progress': `/analytics/${selectedCourse}/topic-matrix`,
                 leaderboard: `/analytics/${selectedCourse}/leaderboard`,
                 'at-risk': `/analytics/${selectedCourse}/at-risk`,
                 engagement: `/analytics/${selectedCourse}/engagement`,
             };
-            fetchData(endpoints[activeView]);
+            if (endpoints[activeView]) fetchData(endpoints[activeView]);
         }
     }, [selectedCourse, activeView, selectedStudentId]);
 
@@ -133,11 +197,11 @@ const TeacherAnalytics = ({ courses = [] }) => {
                                 const isActive = activeView === v.id;
                                 return (
                                     <button key={v.id} onClick={() => setActiveView(v.id)}
-                                        style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 500, whiteSpace: 'nowrap', border: 'none', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.2s', background: isActive ? aGrad : 'transparent', color: isActive ? '#fff' : theme.textMuted, boxShadow: isActive ? `0 4px 14px ${accent.glow}` : 'none' }}
+                                        style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 500, whiteSpace: 'nowrap', border: 'none', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.2s', background: isActive ? aGrad : 'transparent', color: isActive ? '#fff' : theme.textMuted, boxShadow: isActive ? `0 4px 14px ${accent.glow}` : 'none' }}
                                         onMouseEnter={e => { if (!isActive) { e.currentTarget.style.color = theme.textPrimary; e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; } }}
                                         onMouseLeave={e => { if (!isActive) { e.currentTarget.style.color = theme.textMuted; e.currentTarget.style.background = 'transparent'; } }}
                                     >
-                                        <v.icon size={15} />{v.label}
+                                        <v.icon size={14} />{v.label}
                                     </button>
                                 );
                             })}
@@ -155,7 +219,10 @@ const TeacherAnalytics = ({ courses = [] }) => {
                     <>
                         {activeView === 'overview' && <OverviewView data={data} onStudentClick={openStudentDetail} />}
                         {activeView === 'topics' && <TopicsView data={data} />}
+                        {activeView === 'teacher-quiz' && <TeacherQuizView data={data} />}
                         {activeView === 'quiz-analysis' && <QuizForensicsView data={data} />}
+                        {activeView === 'performance' && <PerformanceChartsView data={data} />}
+                        {activeView === 'topic-progress' && <TopicProgressView data={data} onStudentClick={openStudentDetail} />}
                         {activeView === 'leaderboard' && <LeaderboardView data={data} onStudentClick={openStudentDetail} />}
                         {activeView === 'at-risk' && <AtRiskView data={data} onStudentClick={openStudentDetail} />}
                         {activeView === 'engagement' && <EngagementView data={data} />}
@@ -172,8 +239,19 @@ const TeacherAnalytics = ({ courses = [] }) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const OverviewView = ({ data, onStudentClick }) => {
-    const { theme, accent, tooltipStyle } = useT();
+    const { theme, accent, tooltipStyle, courseId } = useT();
     const { summary, riskDistribution, engagementTrend, students } = data;
+    const [progressTab, setProgressTab] = useState('class');
+    const [perfTab, setPerfTab] = useState('class');
+    const [topicsPerf, setTopicsPerf] = useState(null);
+
+    useEffect(() => {
+        if (!courseId) return;
+        setTopicsPerf(null);
+        api.get(`/analytics/${courseId}/topics`)
+            .then(r => setTopicsPerf(r.data.topics || []))
+            .catch(() => setTopicsPerf([]));
+    }, [courseId]);
 
     const riskData = Object.entries(riskDistribution || {})
         .map(([key, val]) => ({ name: RISK_COLORS[key]?.label || key, value: val, color: RISK_COLORS[key]?.text || '#9ca3af' }))
@@ -189,9 +267,153 @@ const OverviewView = ({ data, onStudentClick }) => {
                 <KPICard label="Active (7d)" value={`${summary?.activeRate || 0}%`} icon={Activity} color="#ef4444" subtitle={`${summary?.activeIn7Days || 0} students`} />
             </div>
 
+            {/* Course Progress Card */}
+            <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '20px 24px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '18px' }}>
+                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0 }}>Course Progress</h3>
+                    <div style={{ display: 'inline-flex', background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '3px', gap: '3px' }}>
+                        {[['class', 'Class View'], ['students', 'Student View']].map(([id, label]) => (
+                            <button key={id} onClick={() => setProgressTab(id)}
+                                style={{ padding: '5px 14px', borderRadius: '7px', fontSize: '12px', fontWeight: 600, border: 'none', cursor: 'pointer', fontFamily: 'inherit', background: progressTab === id ? `linear-gradient(135deg,${accent.from},${accent.to})` : 'transparent', color: progressTab === id ? '#fff' : theme.textMuted, transition: 'all 0.15s' }}>
+                                {label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+                {progressTab === 'class' ? (
+                    <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '20px' }}>
+                            <div style={{ flex: 1, height: '14px', background: theme.bg, borderRadius: '99px', overflow: 'hidden' }}>
+                                <div style={{ height: '100%', borderRadius: '99px', background: `linear-gradient(90deg,${accent.from},${accent.to})`, width: `${summary?.avgCompletion || 0}%`, transition: 'width 0.5s' }} />
+                            </div>
+                            <span style={{ fontSize: '16px', fontWeight: 700, color: theme.textPrimary, minWidth: '44px' }}>{summary?.avgCompletion || 0}%</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                            {[
+                                { label: 'Avg Progress', value: `${summary?.avgCompletion || 0}%`, color: accent.from },
+                                { label: 'Avg Quiz Score', value: `${summary?.avgScore || 0}%`, color: (summary?.avgScore || 0) >= 70 ? '#22c55e' : (summary?.avgScore || 0) >= 50 ? '#fbbf24' : '#ef4444' },
+                                { label: 'Active (7d)', value: `${summary?.activeRate || 0}%`, color: '#60a5fa' },
+                            ].map(chip => (
+                                <div key={chip.label} style={{ flex: 1, minWidth: '90px', background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '12px 14px', textAlign: 'center' }}>
+                                    <div style={{ fontSize: '20px', fontWeight: 700, color: chip.color }}>{chip.value}</div>
+                                    <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '3px' }}>{chip.label}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        {[...(students || [])].sort((a, b) => b.completionPct - a.completionPct).map(s => {
+                            const risk = RISK_COLORS[s.risk] || RISK_COLORS.on_track;
+                            const scoreColor = s.avgQuizScore >= 70 ? '#22c55e' : s.avgQuizScore >= 50 ? '#fbbf24' : '#ef4444';
+                            return (
+                                <div key={s.studentId}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '5px' }}>
+                                        <button onClick={() => onStudentClick(s.studentId)}
+                                            style={{ fontSize: '13px', fontWeight: 600, color: theme.textPrimary, background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
+                                            onMouseEnter={e => e.currentTarget.style.color = accent.from}
+                                            onMouseLeave={e => e.currentTarget.style.color = theme.textPrimary}>
+                                            {s.name}
+                                        </button>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <span style={{ fontSize: '12px', fontWeight: 700, color: scoreColor }}>Quiz {s.avgQuizScore}%</span>
+                                            <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '99px', background: risk.bg, color: risk.text, border: `1px solid ${risk.border}` }}>{risk.label}</span>
+                                            <span style={{ fontSize: '13px', fontWeight: 700, color: theme.textPrimary, minWidth: '36px', textAlign: 'right' }}>{s.completionPct}%</span>
+                                        </div>
+                                    </div>
+                                    <div style={{ height: '8px', background: theme.bg, borderRadius: '99px', overflow: 'hidden' }}>
+                                        <div style={{ height: '100%', borderRadius: '99px', background: `linear-gradient(90deg,${accent.from},${accent.to})`, width: `${s.completionPct}%`, transition: 'width 0.4s' }} />
+                                    </div>
+                                </div>
+                            );
+                        })}
+                        {(!students || students.length === 0) && <p style={{ color: theme.textMuted, fontSize: '14px', textAlign: 'center' }}>No students enrolled yet.</p>}
+                    </div>
+                )}
+            </div>
+
+            {/* ── Performance Monitor ───────────────────────────────── */}
+            <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '20px 24px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '18px' }}>
+                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0 }}>Performance Monitor</h3>
+                    <div style={{ display: 'inline-flex', background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '3px', gap: '3px' }}>
+                        {[['class', 'Class View'], ['student', 'Student View']].map(([id, label]) => (
+                            <button key={id} onClick={() => setPerfTab(id)}
+                                style={{ padding: '5px 14px', borderRadius: '7px', fontSize: '12px', fontWeight: 600, border: 'none', cursor: 'pointer', fontFamily: 'inherit', background: perfTab === id ? `linear-gradient(135deg,${accent.from},${accent.to})` : 'transparent', color: perfTab === id ? '#fff' : theme.textMuted, transition: 'all 0.15s' }}>
+                                {label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                {perfTab === 'class' ? (
+                    topicsPerf === null ? (
+                        <p style={{ color: theme.textMuted, fontSize: '13px', textAlign: 'center', padding: '24px 0' }}>Loading…</p>
+                    ) : topicsPerf.filter(t => t.avgScore !== null).length === 0 ? (
+                        <p style={{ color: theme.textMuted, fontSize: '13px', textAlign: 'center', padding: '24px 0' }}>No quiz attempts yet — scores will appear once students take quizzes.</p>
+                    ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '280px', overflowY: 'auto' }}>
+                            {[...topicsPerf]
+                                .filter(t => t.avgScore !== null)
+                                .sort((a, b) => (a.avgScore ?? 100) - (b.avgScore ?? 100))
+                                .map(t => {
+                                    const scoreColor = t.avgScore >= 70 ? '#22c55e' : t.avgScore >= 50 ? '#fbbf24' : '#ef4444';
+                                    const attentionLabel = t.attention === 'critical' ? '⚠ Critical' : t.attention === 'needs_review' ? '△ Review' : null;
+                                    return (
+                                        <div key={t.topicId}>
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                                                    <span style={{ fontSize: '12px', fontWeight: 600, color: theme.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '200px' }}>{t.title}</span>
+                                                    {attentionLabel && (
+                                                        <span style={{ fontSize: '10px', fontWeight: 700, padding: '1px 7px', borderRadius: '99px', flexShrink: 0, background: t.attention === 'critical' ? '#ef444420' : '#fbbf2420', color: t.attention === 'critical' ? '#ef4444' : '#fbbf24', border: `1px solid ${t.attention === 'critical' ? '#ef444440' : '#fbbf2440'}` }}>
+                                                            {attentionLabel}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+                                                    <span style={{ fontSize: '11px', color: theme.textMuted }}>{t.completionRate}% done</span>
+                                                    <span style={{ fontSize: '13px', fontWeight: 700, color: scoreColor, minWidth: '36px', textAlign: 'right' }}>{t.avgScore}%</span>
+                                                </div>
+                                            </div>
+                                            <div style={{ height: '7px', background: theme.bg, borderRadius: '99px', overflow: 'hidden' }}>
+                                                <div style={{ height: '100%', borderRadius: '99px', background: scoreColor, width: `${t.avgScore}%`, transition: 'width 0.4s' }} />
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                        </div>
+                    )
+                ) : (
+                    (!students || students.length === 0) ? (
+                        <p style={{ color: theme.textMuted, fontSize: '13px', textAlign: 'center', padding: '24px 0' }}>No students enrolled yet.</p>
+                    ) : (
+                        <div style={{ height: `${Math.max(180, students.length * 52)}px` }}>
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart
+                                    layout="vertical"
+                                    data={[...students].sort((a, b) => b.avgQuizScore - a.avgQuizScore).map(s => ({
+                                        name: s.name.split(' ')[0],
+                                        'Quiz Score': s.avgQuizScore,
+                                        'Completion': s.completionPct,
+                                    }))}
+                                    margin={{ top: 4, right: 40, left: 10, bottom: 4 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke={theme.border} horizontal={false} />
+                                    <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11, fill: theme.textMuted }} stroke={theme.textMuted} tickFormatter={v => `${v}%`} />
+                                    <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: theme.textPrimary }} stroke="none" width={72} />
+                                    <Tooltip {...tooltipStyle} formatter={v => `${v}%`} />
+                                    <Legend wrapperStyle={{ fontSize: '12px', color: theme.textMuted }} />
+                                    <Bar dataKey="Quiz Score" fill={accent.from} radius={[0, 4, 4, 0]} barSize={10} />
+                                    <Bar dataKey="Completion" fill="#60a5fa" radius={[0, 4, 4, 0]} barSize={10} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    )
+                )}
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 rounded-2xl p-6" style={{ background: theme.surface, border: `1px solid ${theme.border}` }}>
-                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '16px' }}>14-Day Engagement</h3>
+                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '16px' }}>7-Day Engagement</h3>
                     <div style={{ height: '224px' }}>
                         <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={engagementTrend || []}>
@@ -392,43 +614,84 @@ const TopicsView = ({ data }) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// VIEW 3: QUIZ FORENSICS
+// VIEW 3: QUIZ FORENSICS (enhanced with topic filter)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const QuizForensicsView = ({ data }) => {
-    const { theme, tooltipStyle } = useT();
+    const { theme, accent, tooltipStyle, courseId } = useT();
     const { bloomPerformance, mostMissedQuestions } = data;
+    const [selectedTopicFilter, setSelectedTopicFilter] = useState('all');
+    const [topicsData, setTopicsData] = useState(null);
 
-    const bloomChartData = BLOOM_ORDER
-        .filter(bl => bloomPerformance?.[bl])
-        .map(bl => ({ name: bl, score: bloomPerformance[bl].percentage, total: bloomPerformance[bl].total }));
+    useEffect(() => {
+        if (!courseId) return;
+        api.get(`/analytics/${courseId}/topics`)
+            .then(r => setTopicsData(r.data))
+            .catch(() => {});
+    }, [courseId]);
+
+    const selectedTopicObj = selectedTopicFilter !== 'all' && topicsData
+        ? (topicsData.topics || []).find(t => t.topicId === selectedTopicFilter)
+        : null;
+
+    const activeBloom = selectedTopicObj?.bloomPerformance
+        ? BLOOM_ORDER.filter(bl => selectedTopicObj.bloomPerformance[bl])
+            .map(bl => ({ name: bl, score: selectedTopicObj.bloomPerformance[bl].percentage, total: selectedTopicObj.bloomPerformance[bl].total }))
+        : BLOOM_ORDER.filter(bl => bloomPerformance?.[bl])
+            .map(bl => ({ name: bl, score: bloomPerformance[bl].percentage, total: bloomPerformance[bl].total }));
+
+    const filteredQuestions = selectedTopicFilter === 'all'
+        ? (mostMissedQuestions || [])
+        : (mostMissedQuestions || []).filter(q => q.topic === selectedTopicObj?.title);
 
     return (
         <div className="space-y-6">
-            {bloomChartData.length > 0 && (
+            {/* Topic filter pills */}
+            {topicsData?.topics?.length > 0 && (
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {[{ topicId: 'all', title: 'All Topics' }, ...(topicsData.topics || [])].map(t => {
+                        const isActive = selectedTopicFilter === t.topicId;
+                        return (
+                            <button key={t.topicId} onClick={() => setSelectedTopicFilter(t.topicId)}
+                                style={{ padding: '5px 14px', borderRadius: '99px', fontSize: '12px', fontWeight: 600, border: `1px solid ${isActive ? accent.from : theme.border}`, background: isActive ? `${accent.from}18` : 'transparent', color: isActive ? accent.from : theme.textMuted, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s' }}
+                                onMouseEnter={e => { if (!isActive) e.currentTarget.style.borderColor = accent.from; }}
+                                onMouseLeave={e => { if (!isActive) e.currentTarget.style.borderColor = theme.border; }}>
+                                {t.title}
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+
+            {activeBloom.length > 0 && (
                 <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '24px' }}>
-                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '16px' }}>Class Performance by Bloom's Level</h3>
+                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '16px' }}>
+                        {selectedTopicObj ? `Bloom's — ${selectedTopicObj.title}` : "Class Performance by Bloom's Level"}
+                    </h3>
                     <div style={{ height: '256px' }}>
                         <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={bloomChartData}>
+                            <BarChart data={activeBloom}>
                                 <CartesianGrid strokeDasharray="3 3" stroke={theme.border} />
                                 <XAxis dataKey="name" stroke={theme.textMuted} tick={{ fontSize: 12, fill: theme.textMuted }} />
                                 <YAxis stroke={theme.textMuted} domain={[0, 100]} tick={{ fontSize: 11, fill: theme.textMuted }} />
                                 <Tooltip {...tooltipStyle} formatter={val => `${val}%`} />
                                 <Bar dataKey="score" name="Score %" radius={[6, 6, 0, 0]} barSize={40}>
-                                    {bloomChartData.map((d, i) => <Cell key={i} fill={BLOOM_COLORS[d.name] || '#8b5cf6'} />)}
+                                    {activeBloom.map((d, i) => <Cell key={i} fill={BLOOM_COLORS[d.name] || '#8b5cf6'} />)}
                                 </Bar>
                             </BarChart>
                         </ResponsiveContainer>
                     </div>
                 </div>
             )}
+
             <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', overflow: 'hidden' }}>
                 <div style={{ padding: '16px 24px', borderBottom: `1px solid ${theme.border}` }}>
-                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0 }}>Most Missed Questions (All Students)</h3>
+                    <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0 }}>
+                        Most Missed Questions {selectedTopicObj ? `— ${selectedTopicObj.title}` : '(All Topics)'}
+                    </h3>
                 </div>
                 <div>
-                    {(mostMissedQuestions || []).map((q, i) => (
+                    {filteredQuestions.map((q, i) => (
                         <div key={i} style={{ padding: '16px 24px', borderBottom: `1px solid ${theme.border}50` }}
                             onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
                             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
@@ -453,8 +716,10 @@ const QuizForensicsView = ({ data }) => {
                             </div>
                         </div>
                     ))}
-                    {(!mostMissedQuestions || mostMissedQuestions.length === 0) && (
-                        <div style={{ padding: '32px 24px', textAlign: 'center', color: theme.textMuted, fontSize: '14px' }}>No quiz data available yet.</div>
+                    {filteredQuestions.length === 0 && (
+                        <div style={{ padding: '32px 24px', textAlign: 'center', color: theme.textMuted, fontSize: '14px' }}>
+                            {selectedTopicObj ? `No missed questions recorded for "${selectedTopicObj.title}" yet.` : 'No quiz data available yet.'}
+                        </div>
                     )}
                 </div>
             </div>
@@ -463,7 +728,377 @@ const QuizForensicsView = ({ data }) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// VIEW 4: LEADERBOARD
+// VIEW 4 (NEW): PERFORMANCE CHARTS — student-wise & class-wise bar charts
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const PerformanceChartsView = ({ data }) => {
+    const { theme, accent, aGrad, tooltipStyle, courseId } = useT();
+    const [chartMode, setChartMode] = useState('students');
+    const [topicsData, setTopicsData] = useState(null);
+    const [topicsLoading, setTopicsLoading] = useState(false);
+
+    useEffect(() => {
+        if (chartMode === 'class' && !topicsData && courseId) {
+            setTopicsLoading(true);
+            api.get(`/analytics/${courseId}/topics`)
+                .then(r => setTopicsData(r.data))
+                .catch(() => {})
+                .finally(() => setTopicsLoading(false));
+        }
+    }, [chartMode, courseId]);
+
+    const scoreColor = score => score >= 70 ? '#22c55e' : score >= 50 ? '#fbbf24' : '#ef4444';
+
+    const studentChartData = [...(data?.students || [])]
+        .sort((a, b) => b.avgQuizScore - a.avgQuizScore)
+        .map(s => ({ name: s.name.split(' ')[0], fullName: s.name, score: s.avgQuizScore, completion: s.completionPct, risk: s.risk }));
+
+    const topicChartData = (topicsData?.topics || []).map(t => ({
+        name: t.title.length > 14 ? t.title.slice(0, 14) + '…' : t.title,
+        fullName: t.title,
+        avgScore: t.avgScore || 0,
+        completionRate: t.completionRate || 0,
+        failRate: t.failRate || 0,
+    }));
+
+    const ModeToggle = () => (
+        <div style={{ display: 'inline-flex', background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '3px', gap: '3px' }}>
+            {[{ id: 'students', label: 'By Student' }, { id: 'class', label: 'By Topic' }].map(m => (
+                <button key={m.id} onClick={() => setChartMode(m.id)}
+                    style={{ padding: '6px 16px', borderRadius: '7px', fontSize: '13px', fontWeight: 600, border: 'none', cursor: 'pointer', fontFamily: 'inherit', background: chartMode === m.id ? aGrad : 'transparent', color: chartMode === m.id ? '#fff' : theme.textMuted, transition: 'all 0.15s' }}>
+                    {m.label}
+                </button>
+            ))}
+        </div>
+    );
+
+    if (chartMode === 'students') {
+        return (
+            <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                    <h3 style={{ fontSize: '14px', fontWeight: 700, color: theme.textPrimary }}>Student Performance Comparison</h3>
+                    <ModeToggle />
+                </div>
+
+                {studentChartData.length === 0 ? <EmptyState message="No student data available yet." /> : (
+                    <>
+                        <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '24px' }}>
+                            <h4 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '16px' }}>Quiz Score by Student (sorted by score)</h4>
+                            <div style={{ height: '280px' }}>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={studentChartData} margin={{ bottom: 20 }}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke={theme.border} />
+                                        <XAxis dataKey="name" stroke={theme.textMuted} tick={{ fontSize: 11, fill: theme.textMuted }} angle={-30} textAnchor="end" />
+                                        <YAxis stroke={theme.textMuted} domain={[0, 100]} tick={{ fontSize: 11, fill: theme.textMuted }} />
+                                        <Tooltip {...tooltipStyle} formatter={(val, name, props) => [`${val}%`, props.payload.fullName]} />
+                                        <Bar dataKey="score" name="Quiz Score" radius={[6, 6, 0, 0]} barSize={28}>
+                                            {studentChartData.map((d, i) => <Cell key={i} fill={scoreColor(d.score)} />)}
+                                        </Bar>
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+
+                        <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '24px' }}>
+                            <h4 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '16px' }}>Completion % by Student</h4>
+                            <div style={{ height: '280px' }}>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={studentChartData} margin={{ bottom: 20 }}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke={theme.border} />
+                                        <XAxis dataKey="name" stroke={theme.textMuted} tick={{ fontSize: 11, fill: theme.textMuted }} angle={-30} textAnchor="end" />
+                                        <YAxis stroke={theme.textMuted} domain={[0, 100]} tick={{ fontSize: 11, fill: theme.textMuted }} />
+                                        <Tooltip {...tooltipStyle} formatter={(val, name, props) => [`${val}%`, props.payload.fullName]} />
+                                        <Bar dataKey="completion" name="Completion" radius={[6, 6, 0, 0]} barSize={28}>
+                                            {studentChartData.map((d, i) => <Cell key={i} fill={accent.from} fillOpacity={0.6 + (d.completion / 200)} />)}
+                                        </Bar>
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+                    </>
+                )}
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-6">
+            <div className="flex items-center justify-between">
+                <h3 style={{ fontSize: '14px', fontWeight: 700, color: theme.textPrimary }}>Topic Performance (Class-wide)</h3>
+                <ModeToggle />
+            </div>
+
+            {topicsLoading ? (
+                <div className="flex items-center justify-center h-48">
+                    <Loader size={28} style={{ color: accent.from }} className="animate-spin" />
+                </div>
+            ) : topicChartData.length === 0 ? <EmptyState message="No topic data yet." /> : (
+                <>
+                    <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '24px' }}>
+                        <h4 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '16px' }}>Avg Score & Completion Rate per Topic</h4>
+                        <div style={{ height: '300px' }}>
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={topicChartData} margin={{ bottom: 30 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke={theme.border} />
+                                    <XAxis dataKey="name" stroke={theme.textMuted} tick={{ fontSize: 10, fill: theme.textMuted }} angle={-30} textAnchor="end" />
+                                    <YAxis stroke={theme.textMuted} domain={[0, 100]} tick={{ fontSize: 11, fill: theme.textMuted }} />
+                                    <Tooltip {...tooltipStyle} formatter={(val, name, props) => [`${val}%`, name === 'avgScore' ? 'Avg Score' : 'Completion']} labelFormatter={(l, p) => p?.[0]?.payload?.fullName || l} />
+                                    <Bar dataKey="avgScore" name="avgScore" fill={accent.from} radius={[4, 4, 0, 0]} barSize={18} />
+                                    <Bar dataKey="completionRate" name="completionRate" fill={`${accent.from}60`} radius={[4, 4, 0, 0]} barSize={18} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+
+                    <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '24px' }}>
+                        <h4 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '16px' }}>Fail Rate per Topic (higher = needs attention)</h4>
+                        <div style={{ height: '240px' }}>
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={topicChartData} margin={{ bottom: 30 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke={theme.border} />
+                                    <XAxis dataKey="name" stroke={theme.textMuted} tick={{ fontSize: 10, fill: theme.textMuted }} angle={-30} textAnchor="end" />
+                                    <YAxis stroke={theme.textMuted} domain={[0, 100]} tick={{ fontSize: 11, fill: theme.textMuted }} />
+                                    <Tooltip {...tooltipStyle} formatter={val => [`${val}%`, 'Fail Rate']} labelFormatter={(l, p) => p?.[0]?.payload?.fullName || l} />
+                                    <Bar dataKey="failRate" name="Fail Rate" radius={[4, 4, 0, 0]} barSize={22}>
+                                        {topicChartData.map((d, i) => <Cell key={i} fill={d.failRate >= 50 ? '#ef4444' : d.failRate >= 30 ? '#fbbf24' : '#22c55e'} />)}
+                                    </Bar>
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+                </>
+            )}
+        </div>
+    );
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// VIEW 5 (NEW): TOPIC PROGRESS — student × topic heatmap
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const TopicProgressView = ({ data, onStudentClick }) => {
+    const { theme, accent, tooltipStyle } = useT();
+    const [viewMode, setViewMode] = useState('heatmap');
+    const [perfMode, setPerfMode] = useState('class');
+    const [selectedStudentId, setSelectedStudentId] = useState(null);
+    const { topics = [], students = [], matrix = {} } = data || {};
+    const selStudentId = selectedStudentId || students[0]?.studentId || null;
+
+    const topicsWithStats = topics.map(t => {
+        const cells = students.map(s => matrix[t.topicId]?.[s.studentId] || { status: 'not_started', score: null, attempts: 0 });
+        const completed = cells.filter(c => c.status === 'completed').length;
+        const scores = cells.filter(c => c.score !== null).map(c => c.score);
+        return {
+            ...t,
+            completionRate: students.length > 0 ? Math.round(completed / students.length * 100) : 0,
+            avgScore: scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null,
+        };
+    });
+
+    const cellColor = status => status === 'completed' ? '#22c55e' : status === 'in_progress' ? '#fbbf24' : null;
+
+    const ModeToggle = () => (
+        <div style={{ display: 'inline-flex', background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '3px', gap: '3px' }}>
+            {[{ id: 'heatmap', label: 'Heatmap' }, { id: 'bars', label: 'Completion Bars' }, { id: 'performance', label: 'Performance' }].map(m => (
+                <button key={m.id} onClick={() => setViewMode(m.id)}
+                    style={{ padding: '6px 16px', borderRadius: '7px', fontSize: '13px', fontWeight: 600, border: 'none', cursor: 'pointer', fontFamily: 'inherit', background: viewMode === m.id ? `linear-gradient(135deg,${accent.from},${accent.to})` : 'transparent', color: viewMode === m.id ? '#fff' : theme.textMuted, transition: 'all 0.15s' }}>
+                    {m.label}
+                </button>
+            ))}
+        </div>
+    );
+
+    if (topics.length === 0) return <EmptyState message="No topic data available yet." />;
+
+    return (
+        <div className="space-y-6">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                    <h3 style={{ fontSize: '14px', fontWeight: 700, color: theme.textPrimary, margin: 0 }}>Topic Progress</h3>
+                    <p style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>{topics.length} topics · {students.length} students</p>
+                </div>
+                <ModeToggle />
+            </div>
+
+            {/* Legend */}
+            <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                {[{ color: '#22c55e', label: 'Completed' }, { color: '#fbbf24', label: 'In Progress' }, { color: theme.border, label: 'Not Started' }].map(l => (
+                    <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: theme.textMuted }}>
+                        <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: l.color, border: l.color === theme.border ? `1px solid ${theme.border}` : 'none' }} />
+                        {l.label}
+                    </div>
+                ))}
+            </div>
+
+            {viewMode === 'heatmap' && (
+                <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', overflow: 'auto' }}>
+                    <table style={{ borderCollapse: 'collapse', fontSize: '12px', minWidth: '100%' }}>
+                        <thead>
+                            <tr style={{ background: theme.bg }}>
+                                <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', whiteSpace: 'nowrap', minWidth: '180px', position: 'sticky', left: 0, background: theme.bg, zIndex: 2 }}>Topic</th>
+                                {students.map(s => (
+                                    <th key={s.studentId} style={{ padding: '8px 6px', fontSize: '10px', fontWeight: 600, color: theme.textMuted, textAlign: 'center', minWidth: '40px', maxWidth: '60px' }}>
+                                        <span title={s.name} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '52px' }}>{s.name.split(' ')[0]}</span>
+                                    </th>
+                                ))}
+                                <th style={{ padding: '8px 12px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textAlign: 'center' }}>Class %</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {/* Group by module */}
+                            {(() => {
+                                const rows = [];
+                                let lastModule = null;
+                                for (const t of topicsWithStats) {
+                                    if (t.moduleTitle !== lastModule) {
+                                        lastModule = t.moduleTitle;
+                                        rows.push(
+                                            <tr key={`mod-${t.moduleTitle}`}>
+                                                <td colSpan={students.length + 2} style={{ padding: '8px 16px', background: `${accent.from}08`, fontSize: '11px', fontWeight: 700, color: accent.from, textTransform: 'uppercase', letterSpacing: '0.06em', borderTop: `1px solid ${theme.border}` }}>
+                                                    {t.moduleTitle}
+                                                </td>
+                                            </tr>
+                                        );
+                                    }
+                                    rows.push(
+                                        <tr key={t.topicId} style={{ borderTop: `1px solid ${theme.border}30` }}
+                                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+                                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                                            <td style={{ padding: '10px 16px', color: theme.textSecondary, whiteSpace: 'nowrap', position: 'sticky', left: 0, background: theme.surface, zIndex: 1 }}>{t.title}</td>
+                                            {students.map(s => {
+                                                const cell = matrix[t.topicId]?.[s.studentId] || { status: 'not_started', score: null, attempts: 0 };
+                                                const bg = cellColor(cell.status);
+                                                return (
+                                                    <td key={s.studentId} style={{ padding: '6px', textAlign: 'center' }}>
+                                                        <div
+                                                            title={`${s.name}: ${cell.status.replace('_', ' ')}${cell.score !== null ? ` (score: ${cell.score}%)` : ''}${cell.attempts ? ` · ${cell.attempts} attempts` : ''}`}
+                                                            onClick={() => onStudentClick(s.studentId)}
+                                                            style={{ width: '22px', height: '22px', borderRadius: '5px', margin: '0 auto', cursor: 'pointer', background: bg || theme.bg, border: `1px solid ${bg || theme.border}`, opacity: bg ? 1 : 0.4, transition: 'transform 0.1s' }}
+                                                            onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.3)'}
+                                                            onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+                                                        />
+                                                    </td>
+                                                );
+                                            })}
+                                            <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                                <span style={{ fontSize: '12px', fontWeight: 700, color: t.completionRate >= 70 ? '#22c55e' : t.completionRate >= 40 ? '#fbbf24' : '#ef4444' }}>
+                                                    {t.completionRate}%
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    );
+                                }
+                                return rows;
+                            })()}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+            {viewMode === 'bars' && (
+                <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '24px' }}>
+                    <h4 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '16px' }}>Completion Rate per Topic</h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                        {topicsWithStats.map(t => (
+                            <div key={t.topicId}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
+                                    <div>
+                                        <span style={{ fontSize: '13px', color: theme.textSecondary }}>{t.title}</span>
+                                        <span style={{ fontSize: '11px', color: theme.textMuted, marginLeft: '8px' }}>{t.moduleTitle}</span>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '12px', fontSize: '12px' }}>
+                                        {t.avgScore !== null && <span style={{ color: t.avgScore >= 70 ? '#22c55e' : t.avgScore >= 50 ? '#fbbf24' : '#ef4444', fontWeight: 600 }}>avg {t.avgScore}%</span>}
+                                        <span style={{ fontWeight: 700, color: t.completionRate >= 70 ? '#22c55e' : t.completionRate >= 40 ? '#fbbf24' : '#ef4444' }}>{t.completionRate}%</span>
+                                    </div>
+                                </div>
+                                <div style={{ height: '8px', background: theme.bg, borderRadius: '99px', overflow: 'hidden' }}>
+                                    <div style={{ height: '100%', borderRadius: '99px', width: `${t.completionRate}%`, background: t.completionRate >= 70 ? '#22c55e' : t.completionRate >= 40 ? '#fbbf24' : '#ef4444', transition: 'width 0.4s' }} />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+            {viewMode === 'performance' && (
+                <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '24px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '20px' }}>
+                        <h4 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0 }}>Topic Performance</h4>
+                        <div style={{ display: 'inline-flex', background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '3px', gap: '3px' }}>
+                            {[['class', 'Class Avg'], ['student', 'By Student']].map(([id, label]) => (
+                                <button key={id} onClick={() => setPerfMode(id)}
+                                    style={{ padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, border: 'none', cursor: 'pointer', fontFamily: 'inherit', background: perfMode === id ? `linear-gradient(135deg,${accent.from},${accent.to})` : 'transparent', color: perfMode === id ? '#fff' : theme.textMuted, transition: 'all 0.15s' }}>
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    {perfMode === 'class' ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                            {topicsWithStats.map(t => (
+                                <div key={t.topicId}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                                        <div>
+                                            <span style={{ fontSize: '13px', color: theme.textSecondary }}>{t.title}</span>
+                                            <span style={{ fontSize: '11px', color: theme.textMuted, marginLeft: '8px' }}>{t.moduleTitle}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '10px', fontSize: '12px', alignItems: 'center' }}>
+                                            <span style={{ color: theme.textMuted }}>Completion: {t.completionRate}%</span>
+                                            {t.avgScore !== null
+                                                ? <span style={{ fontWeight: 700, color: t.avgScore >= 70 ? '#22c55e' : t.avgScore >= 50 ? '#fbbf24' : '#ef4444' }}>{t.avgScore}%</span>
+                                                : <span style={{ color: theme.textMuted, fontStyle: 'italic', fontSize: '11px' }}>No attempts</span>}
+                                        </div>
+                                    </div>
+                                    <div style={{ height: '8px', background: theme.bg, borderRadius: '99px', overflow: 'hidden' }}>
+                                        <div style={{ height: '100%', borderRadius: '99px', width: `${t.avgScore !== null ? t.avgScore : 0}%`, background: t.avgScore === null ? theme.border : t.avgScore >= 70 ? '#22c55e' : t.avgScore >= 50 ? '#fbbf24' : '#ef4444', transition: 'width 0.4s', opacity: t.avgScore === null ? 0.25 : 1 }} />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div>
+                            <div style={{ marginBottom: '16px' }}>
+                                <select value={selStudentId || ''} onChange={e => setSelectedStudentId(e.target.value)}
+                                    style={{ padding: '8px 12px', borderRadius: '10px', border: `1px solid ${theme.border}`, background: theme.bg, color: theme.textPrimary, fontSize: '13px', fontFamily: 'inherit', cursor: 'pointer', outline: 'none' }}>
+                                    {students.map(s => <option key={s.studentId} value={s.studentId}>{s.name}</option>)}
+                                </select>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                                {topics.map(t => {
+                                    const cell = matrix[t.topicId]?.[selStudentId] || { status: 'not_started', score: null, attempts: 0 };
+                                    const scoreColor = cell.score === null ? theme.border : cell.score >= 70 ? '#22c55e' : cell.score >= 50 ? '#fbbf24' : '#ef4444';
+                                    return (
+                                        <div key={t.topicId}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                                                <div>
+                                                    <span style={{ fontSize: '13px', color: theme.textSecondary }}>{t.title}</span>
+                                                    <span style={{ fontSize: '11px', color: theme.textMuted, marginLeft: '8px' }}>{t.moduleTitle}</span>
+                                                </div>
+                                                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', fontSize: '12px' }}>
+                                                    {cell.attempts > 0 && <span style={{ color: theme.textMuted }}>{cell.attempts} attempt{cell.attempts !== 1 ? 's' : ''}</span>}
+                                                    {cell.score !== null
+                                                        ? <span style={{ fontWeight: 700, color: scoreColor }}>{cell.score}%</span>
+                                                        : <span style={{ padding: '2px 8px', borderRadius: '99px', fontSize: '11px', fontWeight: 600, background: cell.status === 'in_progress' ? 'rgba(251,191,36,0.12)' : `${theme.border}30`, color: cell.status === 'in_progress' ? '#fbbf24' : theme.textMuted, border: `1px solid ${cell.status === 'in_progress' ? 'rgba(251,191,36,0.3)' : theme.border}` }}>
+                                                            {cell.status === 'in_progress' ? 'In Progress' : 'Not Started'}
+                                                        </span>}
+                                                </div>
+                                            </div>
+                                            <div style={{ height: '8px', background: theme.bg, borderRadius: '99px', overflow: 'hidden' }}>
+                                                <div style={{ height: '100%', borderRadius: '99px', width: `${cell.score !== null ? cell.score : cell.status === 'in_progress' ? 15 : 0}%`, background: cell.score === null ? (cell.status === 'in_progress' ? '#fbbf24' : theme.border) : scoreColor, transition: 'width 0.4s', opacity: cell.score === null ? 0.3 : 1 }} />
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                                {students.length === 0 && <p style={{ color: theme.textMuted, fontSize: '14px', textAlign: 'center' }}>No students enrolled yet.</p>}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// VIEW 6: LEADERBOARD
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const LeaderboardView = ({ data, onStudentClick }) => {
@@ -512,7 +1147,7 @@ const LeaderboardView = ({ data, onStudentClick }) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// VIEW 5: AT-RISK STUDENTS
+// VIEW 7: AT-RISK STUDENTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const AtRiskView = ({ data, onStudentClick }) => {
@@ -530,7 +1165,7 @@ const AtRiskView = ({ data, onStudentClick }) => {
                     <div key={a.studentId}
                         style={{ background: theme.surface, border: `1px solid ${sev.border}`, borderRadius: '16px', padding: '24px', cursor: 'pointer', transition: 'background 0.15s' }}
                         onClick={() => onStudentClick(a.studentId)}
-                        onMouseEnter={e => e.currentTarget.style.background = `${theme.bg}`}
+                        onMouseEnter={e => e.currentTarget.style.background = theme.bg}
                         onMouseLeave={e => e.currentTarget.style.background = theme.surface}>
                         <div className="flex items-start justify-between mb-3">
                             <div>
@@ -565,7 +1200,7 @@ const AtRiskView = ({ data, onStudentClick }) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// VIEW 6: ENGAGEMENT
+// VIEW 8: ENGAGEMENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const EngagementView = ({ data }) => {
@@ -612,12 +1247,13 @@ const EngagementView = ({ data }) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// VIEW 7: STUDENT DEEP-DIVE
+// VIEW 9: STUDENT DEEP-DIVE (enhanced with quiz review panel)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const StudentDetailView = ({ data, onBack }) => {
     const { theme, accent, tooltipStyle } = useT();
     const { student, summary, bloomProfile, strengths, weaknesses, topicBreakdown, activityTimeline } = data;
+    const [selectedQuizTopicId, setSelectedQuizTopicId] = useState(null);
 
     const bloomRadarData = BLOOM_ORDER.map(bl => ({ level: bl, score: bloomProfile?.[bl]?.percentage || 0 }));
     const activityData = (activityTimeline || []).map(d => ({
@@ -625,6 +1261,9 @@ const StudentDetailView = ({ data, onBack }) => {
         minutes: Math.round((d.timeSpent || 0) / 60),
     }));
     const risk = RISK_COLORS[summary?.risk] || RISK_COLORS.on_track;
+
+    const topicsWithQuizzes = (topicBreakdown || []).filter(t => t.attempts > 0);
+    const selectedQuizTopic = topicsWithQuizzes.find(t => t.topicId === selectedQuizTopicId);
 
     return (
         <div className="space-y-6">
@@ -728,6 +1367,55 @@ const StudentDetailView = ({ data, onBack }) => {
                 </div>
             </div>
 
+            {/* Quiz Review Panel */}
+            {topicsWithQuizzes.length > 0 && (
+                <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', overflow: 'hidden' }}>
+                    <div style={{ padding: '16px 24px', borderBottom: `1px solid ${theme.border}` }}>
+                        <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0 }}>Quiz Answer Review</h3>
+                    </div>
+                    <div style={{ padding: '16px 24px', borderBottom: `1px solid ${theme.border}`, display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {topicsWithQuizzes.map(t => {
+                            const isActive = selectedQuizTopicId === t.topicId;
+                            return (
+                                <button key={t.topicId} onClick={() => setSelectedQuizTopicId(isActive ? null : t.topicId)}
+                                    style={{ padding: '5px 14px', borderRadius: '99px', fontSize: '12px', fontWeight: 600, border: `1px solid ${isActive ? accent.from : theme.border}`, background: isActive ? `${accent.from}18` : 'transparent', color: isActive ? accent.from : theme.textMuted, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s' }}>
+                                    {t.title}
+                                    {t.bestScore !== null && <span style={{ marginLeft: '6px', opacity: 0.7 }}>{t.bestScore}%</span>}
+                                </button>
+                            );
+                        })}
+                    </div>
+                    {selectedQuizTopic ? (
+                        <div style={{ padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '480px', overflowY: 'auto' }}>
+                            {(selectedQuizTopic.wrongQuestions || []).length === 0 ? (
+                                <p style={{ color: '#22c55e', fontSize: '13px', textAlign: 'center', padding: '24px 0' }}>No wrong answers recorded for this topic.</p>
+                            ) : (selectedQuizTopic.wrongQuestions || []).map((wq, i) => (
+                                <div key={i} style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '16px' }}>
+                                    <p style={{ fontSize: '13px', fontWeight: 600, color: theme.textPrimary, marginBottom: '10px', lineHeight: 1.5 }}>{wq.questionText}</p>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
+                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                                            <span style={{ fontSize: '11px', fontWeight: 700, color: '#ef4444', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '4px', padding: '2px 6px', flexShrink: 0 }}>Given</span>
+                                            <span style={{ fontSize: '13px', color: '#f87171' }}>{wq.studentAnswer || '—'}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                                            <span style={{ fontSize: '11px', fontWeight: 700, color: '#22c55e', background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: '4px', padding: '2px 6px', flexShrink: 0 }}>Correct</span>
+                                            <span style={{ fontSize: '13px', color: '#4ade80' }}>{wq.correctAnswer || '—'}</span>
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '6px' }}>
+                                        {wq.bloomLevel && <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', textTransform: 'capitalize', background: `${BLOOM_COLORS[wq.bloomLevel]}20`, color: BLOOM_COLORS[wq.bloomLevel] }}>{wq.bloomLevel}</span>}
+                                        {wq.difficulty && <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', textTransform: 'capitalize', background: theme.surface, border: `1px solid ${theme.border}`, color: theme.textMuted }}>{wq.difficulty}</span>}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <p style={{ color: theme.textMuted, fontSize: '13px', textAlign: 'center', padding: '24px 0' }}>Select a topic above to review the student's quiz answers.</p>
+                    )}
+                </div>
+            )}
+
+            {/* Topic-by-Topic Breakdown */}
             <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', overflow: 'hidden' }}>
                 <div style={{ padding: '16px 24px', borderBottom: `1px solid ${theme.border}` }}>
                     <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0 }}>Topic-by-Topic Breakdown</h3>

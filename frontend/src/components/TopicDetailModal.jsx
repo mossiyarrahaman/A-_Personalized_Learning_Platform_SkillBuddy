@@ -29,7 +29,7 @@ const resourceColorClass = (type) => {
 };
 
 // ── Step-by-Step Plan Section ──────────────────────────────────────────────
-const StepPlanSection = ({ plan, moduleId, topicId, onStepToggle }) => {
+const StepPlanSection = ({ plan, moduleId, topicId, pathId, onStepToggle }) => {
     const { theme, accent } = useAppTheme();
     const aGrad = `linear-gradient(135deg,${accent.from},${accent.to})`;
     const [expandedStep, setExpandedStep] = useState(0);
@@ -43,7 +43,9 @@ const StepPlanSection = ({ plan, moduleId, topicId, onStepToggle }) => {
         const newCompleted = !currentCompleted;
         setSteps(prev => prev.map(s => s.stepNumber === stepNumber ? { ...s, completed: newCompleted } : s));
         try {
-            await api.post('/courses/path/toggle-step', { moduleId, topicId, stepNumber, completed: newCompleted });
+            const stepBody = { moduleId, topicId, stepNumber, completed: newCompleted };
+            if (pathId) stepBody.pathId = pathId;
+            await api.post('/courses/path/toggle-step', stepBody);
             if (onStepToggle) onStepToggle(steps.map(s => s.stepNumber === stepNumber ? { ...s, completed: newCompleted } : s));
         } catch {
             setSteps(prev => prev.map(s => s.stepNumber === stepNumber ? { ...s, completed: currentCompleted } : s));
@@ -242,7 +244,7 @@ const StepPlanSection = ({ plan, moduleId, topicId, onStepToggle }) => {
 };
 
 // ── Main Component ─────────────────────────────────────────────────────────
-const TopicDetailModal = ({ courseId, moduleId, topicId, onClose, onUpdate }) => {
+const TopicDetailModal = ({ courseId, moduleId, topicId, pathId, onClose, onUpdate }) => {
     const { theme, accent } = useAppTheme();
     const aGrad = `linear-gradient(135deg,${accent.from},${accent.to})`;
 
@@ -255,7 +257,9 @@ const TopicDetailModal = ({ courseId, moduleId, topicId, onClose, onUpdate }) =>
     const refreshPlan = async () => {
         setRefreshingPlan(true);
         try {
-            const res = await api.post('/courses/path/refresh-plan', { moduleId, topicId });
+            const refreshBody = { moduleId, topicId };
+            if (pathId) refreshBody.pathId = pathId;
+            const res = await api.post('/courses/path/refresh-plan', refreshBody);
             setTopic(res.data.topic);
         } catch (err) {
             console.error('Failed to refresh plan', err);
@@ -383,7 +387,9 @@ const TopicDetailModal = ({ courseId, moduleId, topicId, onClose, onUpdate }) =>
     const fetchTopicDetails = async () => {
         try {
             setLoading(true);
-            const queryParams = !isAiPath ? `?courseId=${courseId}` : '';
+            let queryParams = '';
+            if (!isAiPath) queryParams = `?courseId=${courseId}`;
+            else if (pathId) queryParams = `?pathId=${pathId}`;
             const res = await api.get(`/courses/module/${moduleId}/topic/${topicId}${queryParams}`);
             setTopic(res.data.topic);
         } catch (error) {
@@ -407,7 +413,9 @@ const TopicDetailModal = ({ courseId, moduleId, topicId, onClose, onUpdate }) =>
                 (r.id === resourceId || r._id === resourceId) ? { ...r, completed: newStatus } : r
             );
             setTopic({ ...topic, resources: updatedResources });
-            await api.post('/courses/progress', { moduleId, topicId, resourceId, progress: newStatus ? 100 : 0 });
+            const progressBody = { moduleId, topicId, resourceId, progress: newStatus ? 100 : 0 };
+            if (pathId) progressBody.pathId = pathId;
+            await api.post('/courses/progress', progressBody);
             if (onUpdate) onUpdate();
         } catch { console.error('Failed to update progress'); }
     };
@@ -650,6 +658,7 @@ const TopicDetailModal = ({ courseId, moduleId, topicId, onClose, onUpdate }) =>
                                         plan={topic.plan}
                                         moduleId={moduleId}
                                         topicId={topicId}
+                                        pathId={pathId}
                                         onStepToggle={(updatedSteps) => setTopic(prev => ({ ...prev, plan: { ...prev.plan, steps: updatedSteps } }))}
                                     />
                                 </div>

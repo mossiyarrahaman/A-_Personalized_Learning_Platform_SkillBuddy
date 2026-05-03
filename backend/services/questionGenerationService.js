@@ -248,7 +248,7 @@ OUTPUT — respond with ONLY this JSON array:
       {"label": "C", "text": "Option text", "isCorrect": false},
       {"label": "D", "text": "Option text", "isCorrect": false}
     ],
-    "explanation": "Why the correct answer is right, referencing source material",
+    "explanation": "2-3 sentences: why the correct answer is right (referencing source material), with a simple real-world analogy the student can relate to.",
     "difficulty": "${difficulty === 'mixed' ? 'medium' : difficulty}",
     "bloomLevel": "${bloomLevel === 'mixed' ? 'understand' : bloomLevel}"
   }

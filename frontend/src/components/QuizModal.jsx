@@ -39,12 +39,33 @@ const QuizModal = ({
     const [result, setResult] = useState(null);
     const [saving, setSaving] = useState(false);
 
+    // Teacher quiz state
+    const [teacherQuiz, setTeacherQuiz] = useState(null);       // { questions, bloomLevel, difficulty } or null
+    const [checkingTeacher, setCheckingTeacher] = useState(false);
+    const [isTeacherAssessment, setIsTeacherAssessment] = useState(false);
+
     // Use refs so timer callback always sees fresh values
     const answersRef = useRef({});
     const questionsRef = useRef([]);
     const startRef = useRef(null);
     const bloomRef = useRef(bloomLevel);
     bloomRef.current = bloomLevel;
+
+    // Check for teacher-generated quiz on open
+    useEffect(() => {
+        if (!isOpen || !topicId || !courseId) { setTeacherQuiz(null); return; }
+        setCheckingTeacher(true);
+        api.get(`/rag/topic-quiz/${courseId}/${topicId}`)
+            .then(res => {
+                if (res.data.exists && res.data.questions?.length) {
+                    setTeacherQuiz({ questions: res.data.questions, bloomLevel: res.data.bloomLevel, difficulty: res.data.difficulty });
+                } else {
+                    setTeacherQuiz(null);
+                }
+            })
+            .catch(() => setTeacherQuiz(null))
+            .finally(() => setCheckingTeacher(false));
+    }, [isOpen, topicId, courseId]);
 
     // Sync answers ref
     useEffect(() => { answersRef.current = answers; }, [answers]);
@@ -68,6 +89,23 @@ const QuizModal = ({
         }, 1000);
         return () => clearInterval(id);
     }, [stage]);
+
+    const startTeacherAssessment = () => {
+        if (!teacherQuiz) return;
+        const qs = teacherQuiz.questions;
+        setQuestions(qs);
+        questionsRef.current = qs;
+        setNumQs(qs.length);
+        setBloomLevel(teacherQuiz.bloomLevel || 'understand');
+        bloomRef.current = teacherQuiz.bloomLevel || 'understand';
+        setAnswers({});
+        answersRef.current = {};
+        setCurrent(0);
+        setRevealed(false);
+        setIsTeacherAssessment(true);
+        startRef.current = Date.now();
+        setStage('active');
+    };
 
     const startQuiz = async () => {
         setStage('loading');
@@ -135,6 +173,8 @@ const QuizModal = ({
                     correctAnswer: q.correctAnswer,
                     explanation: q.explanation || '',
                     topic: topicTitle,
+                    bloomLevel: q.bloomLevel || bloom,
+                    difficulty: q.difficulty || 'medium',
                 });
             }
         });
@@ -154,19 +194,34 @@ const QuizModal = ({
             completedAt: new Date().toISOString(),
         };
 
-        console.log('[QuizModal] Submitting result:', resultData);
-
         setResult(resultData);
         setStage('results');
 
-        // Save to localStorage (sync) + backend (async)
+        // Save to localStorage
         setSaving(true);
-        try {
-            saveQuizResult(resultData);
-        } catch (e) {
-            console.error('[QuizModal] Save error:', e);
-        } finally {
-            setSaving(false);
+        try { saveQuizResult(resultData); } catch (e) { console.error('[QuizModal] LocalStorage save error:', e); } finally { setSaving(false); }
+
+        // Save to backend (async — don't block UI)
+        if (topicId && moduleId && courseId) {
+            api.post(`/courses/${courseId}/module/${moduleId}/topic/${topicId}/quiz/submit`, {
+                score: pct,
+                totalQuestions: qs.length,
+                correctAnswers: correct,
+                bloomLevel: bloom,
+                topicTitle,
+                isTeacherAssessment,
+                wrongQuestions: mistakes.map(m => ({
+                    questionText: m.question,
+                    studentAnswer: m.userAnswer,
+                    correctAnswer: m.correctAnswer,
+                    bloomLevel: m.bloomLevel || bloom,
+                    difficulty: m.difficulty || 'medium',
+                })),
+            }).then(res => {
+                if (res.data?.pointsAwarded > 0) {
+                    window.dispatchEvent(new CustomEvent('points-updated', { detail: { points: res.data.pointsAwarded } }));
+                }
+            }).catch(err => console.warn('[QuizModal] Backend save failed:', err.message));
         }
 
         // Notify analytics page to reload
@@ -184,6 +239,7 @@ const QuizModal = ({
         setCurrent(0);
         setRevealed(false);
         setResult(null);
+        setIsTeacherAssessment(false);
     };
 
     if (!isOpen) return null;
@@ -204,7 +260,7 @@ const QuizModal = ({
                                 <Brain size={18} style={{ color: accent.from }} />
                             </div>
                             <div>
-                                <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 700, fontSize: '15px', color: theme.textPrimary }}>Quick Quiz</div>
+                                <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 700, fontSize: '15px', color: theme.textPrimary }}>Quiz</div>
                                 <div style={{ fontSize: '12px', color: theme.textMuted, maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{topicTitle}</div>
                             </div>
                         </div>
@@ -212,41 +268,97 @@ const QuizModal = ({
                     </div>
 
                     <div style={{ padding: '22px', overflowY: 'auto' }}>
-                        <div style={{ marginBottom: '20px' }}>
-                            <div style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>
-                                Bloom's Level
-                            </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '7px' }}>
-                                {BLOOM_LEVELS.map(b => {
-                                    const active = bloomLevel === b.key;
-                                    return (
-                                        <button key={b.key} onClick={() => setBloomLevel(b.key)} style={{ padding: '9px 6px', borderRadius: '10px', border: `2px solid ${active ? accent.from : theme.border}`, background: active ? `${accent.from}18` : 'none', color: active ? accent.from : theme.textSecondary, fontWeight: 600, fontSize: '12px', cursor: 'pointer', transition: 'all .2s', fontFamily: "'DM Sans',sans-serif", textAlign: 'center', lineHeight: 1.3 }}>
-                                            {b.label}
-                                            <div style={{ fontSize: '10px', fontWeight: 400, opacity: 0.75, marginTop: '2px', color: active ? accent.from : theme.textMuted }}>{b.desc}</div>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        </div>
 
-                        <div style={{ marginBottom: '20px' }}>
-                            <div style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>
-                                Questions: <span style={{ color: accent.from }}>{numQs}</span>
+                        {/* Teacher Assessment — PRIMARY */}
+                        {checkingTeacher && (
+                            <div style={{ padding: '10px 14px', background: `${accent.from}08`, border: `1px solid ${accent.from}20`, borderRadius: '10px', fontSize: '12px', color: theme.textMuted, marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <div style={{ width: '14px', height: '14px', border: `2px solid ${accent.from}`, borderTopColor: 'transparent', borderRadius: '50%', flexShrink: 0, animation: 'spin .8s linear infinite' }} />
+                                Checking for teacher quiz…
                             </div>
-                            <input type="range" min={3} max={15} step={1} value={numQs} onChange={e => setNumQs(Number(e.target.value))} style={{ width: '100%', accentColor: accent.from }} />
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}><span>3 — Quick</span><span>15 — Full</span></div>
-                        </div>
+                        )}
 
-                        <div style={{ background: `${accent.from}10`, border: `1px solid ${accent.from}25`, borderRadius: '12px', padding: '12px 14px', marginBottom: '22px', display: 'flex', gap: '10px' }}>
-                            <AlertCircle size={15} style={{ color: accent.from, flexShrink: 0, marginTop: '1px' }} />
-                            <div style={{ fontSize: '12.5px', color: theme.textSecondary, lineHeight: 1.6 }}>
-                                Time limit: <strong style={{ color: theme.textPrimary }}>{fmt(numQs * 30)}</strong> · Results auto-saved to your analytics
+                        {!checkingTeacher && teacherQuiz && (
+                            <div style={{ background: `linear-gradient(135deg,${accent.from}14,${accent.to}0a)`, border: `2px solid ${accent.from}40`, borderRadius: '14px', padding: '18px 18px 16px', marginBottom: '22px', position: 'relative', overflow: 'hidden' }}>
+                                <div style={{ position: 'absolute', top: 0, right: 0, width: '120px', height: '120px', background: `radial-gradient(circle,${accent.from}15 0%,transparent 70%)`, pointerEvents: 'none' }} />
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                                    <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#fff', background: aGrad, padding: '3px 10px', borderRadius: '99px' }}>Assigned Quiz</span>
+                                    <CheckCircle size={14} style={{ color: '#22c55e' }} />
+                                </div>
+                                <div style={{ fontSize: '15px', fontWeight: 700, color: theme.textPrimary, marginBottom: '8px', fontFamily: "'Sora',sans-serif" }}>
+                                    Teacher Quiz — {topicTitle}
+                                </div>
+                                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' }}>
+                                    {[
+                                        { label: `${teacherQuiz.questions.length} Questions` },
+                                        { label: `Bloom's: ${(teacherQuiz.bloomLevel || 'mixed').charAt(0).toUpperCase() + (teacherQuiz.bloomLevel || 'mixed').slice(1)}` },
+                                        { label: `${(teacherQuiz.difficulty || 'Intermediate')}` },
+                                        { label: `~${Math.ceil(teacherQuiz.questions.length * 0.5)} min` },
+                                    ].map(chip => (
+                                        <span key={chip.label} style={{ fontSize: '12px', fontWeight: 600, color: theme.textSecondary, background: theme.surface, border: `1px solid ${theme.border}`, padding: '3px 10px', borderRadius: '99px' }}>{chip.label}</span>
+                                    ))}
+                                </div>
+                                <button onClick={startTeacherAssessment} style={{ width: '100%', padding: '13px', borderRadius: '10px', background: aGrad, border: 'none', color: '#fff', fontWeight: 700, fontSize: '15px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: `0 4px 18px ${accent.glow}`, fontFamily: "'DM Sans',sans-serif" }}>
+                                    <Brain size={16} /> Start Teacher Quiz
+                                </button>
                             </div>
-                        </div>
+                        )}
 
-                        <button onClick={startQuiz} style={{ width: '100%', padding: '13px', borderRadius: '12px', background: aGrad, border: 'none', color: '#fff', fontWeight: 700, fontSize: '15px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: `0 4px 20px ${accent.glow}`, fontFamily: "'DM Sans',sans-serif" }}>
-                            <Brain size={17} /> Start Quiz
-                        </button>
+                        {/* Practice Mode — SECONDARY when teacher quiz exists */}
+                        {!checkingTeacher && (
+                            <>
+                                <div style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '12px' }}>
+                                    {teacherQuiz ? 'Or Practice with AI' : 'Choose Quiz Settings'}
+                                </div>
+
+                                <div style={{ marginBottom: '20px' }}>
+                                    <div style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>
+                                        Bloom's Level
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '7px' }}>
+                                        {BLOOM_LEVELS.map(b => {
+                                            const active = bloomLevel === b.key;
+                                            return (
+                                                <button key={b.key} onClick={() => setBloomLevel(b.key)} style={{ padding: '9px 6px', borderRadius: '10px', border: `2px solid ${active ? accent.from : theme.border}`, background: active ? `${accent.from}18` : 'none', color: active ? accent.from : theme.textSecondary, fontWeight: 600, fontSize: '12px', cursor: 'pointer', transition: 'all .2s', fontFamily: "'DM Sans',sans-serif", textAlign: 'center', lineHeight: 1.3 }}>
+                                                    {b.label}
+                                                    <div style={{ fontSize: '10px', fontWeight: 400, opacity: 0.75, marginTop: '2px', color: active ? accent.from : theme.textMuted }}>{b.desc}</div>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                <div style={{ marginBottom: '20px' }}>
+                                    <div style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>
+                                        Questions: <span style={{ color: accent.from }}>{numQs}</span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                        <button
+                                            onClick={() => setNumQs(n => Math.max(3, n - 1))}
+                                            disabled={numQs <= 3}
+                                            style={{ width: '30px', height: '30px', borderRadius: '8px', border: `1px solid ${theme.border}`, background: numQs <= 3 ? 'none' : `${accent.from}15`, color: numQs <= 3 ? theme.textMuted : accent.from, fontWeight: 700, fontSize: '16px', cursor: numQs <= 3 ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}
+                                        >−</button>
+                                        <input type="range" min={3} max={15} step={1} value={numQs} onChange={e => setNumQs(Number(e.target.value))} style={{ flex: 1, accentColor: accent.from }} />
+                                        <button
+                                            onClick={() => setNumQs(n => Math.min(15, n + 1))}
+                                            disabled={numQs >= 15}
+                                            style={{ width: '30px', height: '30px', borderRadius: '8px', border: `1px solid ${theme.border}`, background: numQs >= 15 ? 'none' : `${accent.from}15`, color: numQs >= 15 ? theme.textMuted : accent.from, fontWeight: 700, fontSize: '16px', cursor: numQs >= 15 ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}
+                                        >+</button>
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}><span>3 — Quick</span><span>15 — Full</span></div>
+                                </div>
+
+                                <div style={{ background: `${accent.from}10`, border: `1px solid ${accent.from}25`, borderRadius: '12px', padding: '12px 14px', marginBottom: '22px', display: 'flex', gap: '10px' }}>
+                                    <AlertCircle size={15} style={{ color: accent.from, flexShrink: 0, marginTop: '1px' }} />
+                                    <div style={{ fontSize: '12.5px', color: theme.textSecondary, lineHeight: 1.6 }}>
+                                        Time limit: <strong style={{ color: theme.textPrimary }}>{fmt(numQs * 30)}</strong> · Results auto-saved to your analytics
+                                    </div>
+                                </div>
+
+                                <button onClick={startQuiz} style={{ width: '100%', padding: '13px', borderRadius: '12px', background: teacherQuiz ? 'none' : aGrad, border: teacherQuiz ? `1px solid ${theme.border}` : 'none', color: teacherQuiz ? theme.textSecondary : '#fff', fontWeight: 700, fontSize: '15px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: teacherQuiz ? 'none' : `0 4px 20px ${accent.glow}`, fontFamily: "'DM Sans',sans-serif" }}>
+                                    <Brain size={17} /> {teacherQuiz ? 'Start Practice Quiz' : 'Start Quiz'}
+                                </button>
+                            </>
+                        )}
                     </div>
                 </>)}
 
@@ -277,8 +389,8 @@ const QuizModal = ({
                     </div>
 
                     <div style={{ padding: '22px', overflowY: 'auto', flex: 1 }}>
-                        <div style={{ display: 'inline-block', background: `${accent.from}18`, border: `1px solid ${accent.from}35`, borderRadius: '20px', padding: '3px 10px', fontSize: '11px', fontWeight: 600, color: accent.from, marginBottom: '14px' }}>
-                            {BLOOM_LEVELS.find(b => b.key === bloomLevel)?.label} · {topicTitle}
+                        <div style={{ display: 'inline-block', background: isTeacherAssessment ? 'rgba(34,197,94,0.12)' : `${accent.from}18`, border: `1px solid ${isTeacherAssessment ? 'rgba(34,197,94,0.3)' : `${accent.from}35`}`, borderRadius: '20px', padding: '3px 10px', fontSize: '11px', fontWeight: 600, color: isTeacherAssessment ? '#22c55e' : accent.from, marginBottom: '14px' }}>
+                            {isTeacherAssessment ? '✓ Teacher Assessment · ' : ''}{BLOOM_LEVELS.find(b => b.key === bloomLevel)?.label} · {topicTitle}
                         </div>
                         <div style={{ fontFamily: "'Sora',sans-serif", fontSize: '16px', fontWeight: 700, color: theme.textPrimary, lineHeight: 1.55, marginBottom: '18px' }}>
                             {questions[current].question}
@@ -345,6 +457,17 @@ const QuizModal = ({
                                 : <div style={{ fontSize: '11px', color: '#34d399', marginTop: '6px' }}>✓ Saved to analytics</div>
                             }
                         </div>
+
+                        {/* Teacher quiz completion banner */}
+                        {isTeacherAssessment && result.pct >= 80 && (
+                            <div style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: '12px', padding: '14px 16px', marginBottom: '16px', textAlign: 'center' }}>
+                                <div style={{ fontSize: '24px', marginBottom: '4px' }}>🏆</div>
+                                <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 700, color: '#22c55e', fontSize: '15px' }}>Topic Completed!</div>
+                                <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '4px', lineHeight: 1.5 }}>
+                                    You scored {result.pct}% on the teacher quiz — this topic is now marked complete.
+                                </div>
+                            </div>
+                        )}
 
                         {/* Stats */}
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '10px', marginBottom: '20px' }}>

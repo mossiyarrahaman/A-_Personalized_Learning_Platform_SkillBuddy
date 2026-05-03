@@ -294,7 +294,7 @@ Return ONLY a valid JSON array. No markdown.
     "question": "Question text",
     "options": ["Option A", "Option B", "Option C", "Option D"],
     "correctAnswer": "Option A",
-    "explanation": "Brief explanation under 20 words.",
+    "explanation": "2-3 sentences: explain simply for a student, then give a real-life analogy or everyday example to make it click.",
     "hint": "Helpful hint."
   }
 ]`;
@@ -329,36 +329,56 @@ const BLOOM_DESCRIPTIONS = {
   create:     'design or construct something new — "Design a...", "How would you architect...?", "Write a solution for..."'
 };
 
+const BLOOM_STEMS = {
+  remember:  { allowed: ['What is', 'Define', 'Which of the following', 'Name', 'List', 'Identify'],
+               forbidden: ['design', 'create', 'evaluate', 'compare', 'write code'] },
+  understand:{ allowed: ['Explain', 'What does', 'How does', 'Describe', 'What is meant by', 'Summarize'],
+               forbidden: ['design', 'create', 'write code', 'evaluate', 'which is better'] },
+  apply:     { allowed: ['How would you use', 'Which approach', 'Write code to', 'Implement', 'Calculate', 'Solve'],
+               forbidden: ['What is the definition', 'Define', 'Name', 'List'] },
+  analyze:   { allowed: ['Why does', 'What is the difference between', 'Identify the issue', 'Compare', 'What causes', 'Which of the following is NOT'],
+               forbidden: ['Define', 'Name', 'Write code', 'Design'] },
+  evaluate:  { allowed: ['Which approach is better and why', 'What are the trade-offs', 'Should you use', 'What is the best reason', 'Justify'],
+               forbidden: ['Define', 'Name', 'Write code', 'Design'] },
+  create:    { allowed: ['Design a', 'How would you architect', 'What would you build', 'Propose a solution', 'Construct'],
+               forbidden: ['What is', 'Define', 'Name', 'List'] },
+};
+
 async function generateTopicQuiz(topic, moduleName, className, subjectField, level, bloomLevel = 'understand', contextText = '', numQuestions = 10) {
   const bloomDesc = BLOOM_DESCRIPTIONS[bloomLevel] || BLOOM_DESCRIPTIONS.understand;
+  const stems = BLOOM_STEMS[bloomLevel] || BLOOM_STEMS.understand;
   const hasContext = contextText && contextText.trim().length > 50;
+  const askFor = numQuestions + 3;
 
   const contextSection = hasContext
     ? `\n\nCOURSE MATERIAL CONTEXT (use this as the primary source for question content):\n"""\n${contextText.substring(0, 3000)}\n"""`
     : '';
 
-  const prompt = `You are writing a quiz. Generate exactly ${numQuestions} multiple-choice questions ONLY about the topic below.
+  const prompt = `You are an expert quiz writer. Generate ${askFor} multiple-choice questions about the EXACT topic below, then I will take the best ${numQuestions}.
 
 SUBJECT: ${subjectField}
 COURSE: ${className}
 MODULE: ${moduleName}
 TOPIC: ${topic}
-BLOOM LEVEL: ${bloomLevel} (${bloomDesc})${contextSection}
+BLOOM LEVEL: ${bloomLevel} — ${bloomDesc}${contextSection}
 
-STRICT RULES:
-1. Every question must test knowledge of "${topic}" specifically — not the module, not the course, not any other topic.
-2. Do NOT use "${topic}" literally in the question if its meaning depends on context; instead write questions that make the subject area clear from the question itself.
-3. Every question must match the Bloom's level "${bloomLevel}": ${bloomDesc}.
-4. If course material is provided above, derive questions from it. Otherwise use your knowledge of "${topic}" in ${subjectField}.
+RULES (follow every one strictly):
+1. TOPIC LOCK: Every question must be answerable only by knowing about "${topic}" specifically. If a question could be answered without knowing "${topic}", rewrite it.
+2. BLOOM LOCK: Every question must be at the "${bloomLevel}" cognitive level.
+   ALLOWED question starters: ${stems.allowed.join(', ')}.
+   FORBIDDEN words/phrases in questions: ${stems.forbidden.join(', ')}.
+3. No question may start with the literal word "${topic}" — rephrase so the subject is clear from context.
+4. 4 answer options each; exactly one is unambiguously correct.
+5. Return ONLY a valid JSON array of exactly ${numQuestions} objects — no markdown, no text outside the JSON array.
 
-Return ONLY a valid JSON array, no markdown:
+JSON format (return EXACTLY ${numQuestions} elements):
 [
   {
     "question": "...",
     "code": "",
     "options": ["A) ...", "B) ...", "C) ...", "D) ..."],
     "correctAnswer": "A) ...",
-    "explanation": "One sentence explanation.",
+    "explanation": "2-3 sentences: explain simply for a student, then give a real-life analogy or everyday example to make it click.",
     "hint": "Short hint.",
     "bloomLevel": "${bloomLevel}",
     "difficulty": 5
@@ -384,15 +404,15 @@ Return ONLY a valid JSON array, no markdown:
     }));
   } catch (error) {
     console.error('❌ generateTopicQuiz failed:', error.message);
-    return Array.from({ length: 5 }, (_, i) => ({
-      question: `Fallback Q${i + 1}: Key concept in ${topic} (${subjectField})?`,
+    return Array.from({ length: numQuestions }, (_, i) => ({
+      question: `Question ${i + 1}: What is an important aspect of ${topic}?`,
       code: '',
-      options: ['Concept A', 'Concept B', 'Concept C', 'Concept D'],
-      correctAnswer: 'Concept A',
-      explanation: 'Fallback — AI unavailable.',
-      hint: 'Select the first option.',
+      options: ['Review your course material', 'Check the module resources', 'Ask your instructor', 'Research further'],
+      correctAnswer: 'Review your course material',
+      explanation: `Quiz generation failed — review ${topic} in your course materials.`,
+      hint: `Refer to the ${topic} section of your course.`,
       bloomLevel: bloomLevel,
-      difficulty: 1
+      difficulty: 3
     }));
   }
 }
@@ -409,7 +429,7 @@ Return ONLY a valid JSON array. No markdown.
     "question": "Question text here",
     "options": ["Option A", "Option B", "Option C", "Option D"],
     "correctAnswer": "Option A",
-    "explanation": "Brief explanation under 20 words.",
+    "explanation": "2-3 sentences: explain simply for a student, then give a real-life analogy or everyday example to make it click.",
     "hint": "One short hint.",
     "bloomLevel": "remember",
     "topic": "Topic name"
@@ -479,7 +499,7 @@ Return ONLY valid JSON. No markdown, no extra text.
     {
       "stepNumber": 1,
       "title": "EXACT subtopic title from the list",
-      "explanation": "3-4 sentences: what this concept is, WHY it matters in real projects, and how it connects to ${topicTitle} as a whole. Be specific and concrete.",
+      "explanation": "3-4 sentences: what this concept is, WHY it matters in real projects, and how it connects to ${topicTitle} as a whole. Be specific and concrete. Include one everyday real-world analogy a student can immediately relate to.",
       "teacherNote": "One insider tip, gotcha, or best-practice observation that only an experienced ${field} practitioner would know. Start with 'Pro tip:' or 'Watch out:'.",
       "exampleCode": "A minimal, self-contained code snippet demonstrating this concept. Use empty string if not code-related.",
       "exampleExplanation": "2-3 sentences walking through what the example shows and why it was written that way.",

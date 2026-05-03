@@ -31,7 +31,7 @@ const ManageStudentsModal = ({ course, onClose, onUpdate }) => {
             const response = await api.get('/auth/students');
             const allStudents = response.data.students || [];
             const shuffled = allStudents.sort(() => 0.5 - Math.random());
-            setAvailableStudents(shuffled.slice(0, 10));
+            setAvailableStudents(shuffled.slice(0, 20));
         } catch (error) {
             console.error('Failed to fetch available students', error);
         } finally {

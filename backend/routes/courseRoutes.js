@@ -20,7 +20,10 @@ router.get('/:courseId/module/:moduleId/topic/:topicId/quiz', auth, courseContro
 router.post('/:courseId/module/:moduleId/topic/:topicId/quiz/submit', auth, courseController.submitTopicQuiz);
 
 // Student Class Routes
+router.get('/student/available-courses', auth, courseController.getAvailableCourses); // Browse joinable courses
+router.post('/student/self-enroll/:courseId', auth, courseController.selfEnrollStudent); // Student self-enroll
 router.post('/:courseId/enroll', auth, courseController.enrollStudent); // Teacher enrolls student
+router.delete('/:courseId/enroll/:studentId', auth, courseController.unenrollStudent); // Teacher removes student
 router.get('/student/enrolled-classes', auth, courseController.getEnrolledClasses); // Student gets their classes
 router.post('/class-progress', auth, courseController.updateClassProgress); // Update tracking for class
 router.post('/path/toggle-topic', auth, courseController.toggleTopicComplete);
@@ -28,5 +31,10 @@ router.post('/path/toggle-step', auth, courseController.toggleStepComplete);
 router.post('/path/submit-ai-quiz', auth, courseController.submitAiPathQuiz);
 router.post('/path/refresh-plan', auth, courseController.refreshTopicPlan);
 router.post('/generate-resource-quiz', auth, courseController.generateResourceQuiz); // Generate quiz from resource
+
+// Multiple AI Paths
+router.post('/paths', auth, courseController.addCoursePath);
+router.post('/paths/toggle-topic', auth, courseController.toggleExtraPathTopic);
+router.get('/paths/:pathId', auth, courseController.getExtraPath);
 
 module.exports = router;

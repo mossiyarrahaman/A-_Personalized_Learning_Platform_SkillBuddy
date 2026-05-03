@@ -34,6 +34,7 @@ const courseSchema = new mongoose.Schema({
             // Teacher Tracking
             teacherStatus: { type: String, enum: ['not_covered', 'in_progress', 'completed'], default: 'not_covered' },
             isChecked: { type: Boolean, default: false }, // Checkbox tracking
+            quizPublished: { type: Boolean, default: false },
 
             resources: [{
                 type: { type: String, enum: ['video', 'article', 'book', 'documentation', 'audio', 'quiz', 'assignment', 'link'] },

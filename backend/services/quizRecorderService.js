@@ -139,22 +139,21 @@ async function recordQuizResult({
             (((profile.stats.avgScore || 0) * (totalQuizzes - 1)) + score) / totalQuizzes
         );
 
-        if (passed) {
-            pointsAwarded = 50;
-            profile.points = (profile.points || 0) + pointsAwarded;
+        // +10 for attempting, +50 for passing (replaces the attempt bonus on pass)
+        pointsAwarded = passed ? 50 : 10;
+        profile.points = (profile.points || 0) + pointsAwarded;
 
-            // Badges
-            if (totalQuizzes === 1) {
+        if (passed) {
+            // Badges — dedup by fixed id
+            const existingIds = new Set((profile.badges || []).map(b => b.id));
+            if (totalQuizzes === 1 && !existingIds.has('first_quiz')) {
                 profile.badges.push({ id: 'first_quiz', name: 'First Quiz Ace', icon: '🎯' });
             }
-            if (score === 100) {
-                profile.badges.push({ id: `perfect_${Date.now()}`, name: 'Perfectionist', icon: '🌟' });
+            if (score === 100 && !existingIds.has('perfect_score')) {
+                profile.badges.push({ id: 'perfect_score', name: 'Perfectionist', icon: '🌟' });
             }
-            if (totalQuizzes >= 10) {
-                const has10Badge = profile.badges.some(b => b.id === 'quiz_master');
-                if (!has10Badge) {
-                    profile.badges.push({ id: 'quiz_master', name: 'Quiz Master', icon: '🏆' });
-                }
+            if (totalQuizzes >= 10 && !existingIds.has('quiz_master')) {
+                profile.badges.push({ id: 'quiz_master', name: 'Quiz Master', icon: '🏆' });
             }
         }
 

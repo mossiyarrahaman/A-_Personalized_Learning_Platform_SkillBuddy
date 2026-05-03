@@ -68,6 +68,7 @@ const quizScoreSchema = new mongoose.Schema({
     correctAnswers: Number,
     passed: { type: Boolean, default: false },
     bloomLevel: { type: String, default: 'understand' },
+    isTeacherAssessment: { type: Boolean, default: false },
     attempts: { type: Number, default: 1 },
     wrongQuestions: [wrongQuestionSchema],
     attemptDate: { type: Date, default: Date.now },

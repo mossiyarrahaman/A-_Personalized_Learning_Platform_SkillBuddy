@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Menu, Users, BookOpen, BarChart, LogOut, Home, Plus, MessageCircle, X, ListChecks } from 'lucide-react';
+import { Menu, Users, BookOpen, BarChart, LogOut, Home, Plus, MessageCircle, MessagesSquare, X, ListChecks, User2, Trash2 } from 'lucide-react';
 import api from '../api/axios';
 import TeacherAnalytics from '../components/TeacherAnalytics';
+import TeacherOverview from '../components/TeacherOverview';
+import TeacherProfile from '../components/TeacherProfile';
 import CurriculumBuilder from '../components/CurriculumBuilder';
 import DoubtReplyModal from '../components/DoubtReplyModal';
 import ManageStudentsModal from '../components/ManageStudentsModal';
+import ClassChat from '../components/ClassChat';
 import { useAppTheme } from '../hooks/useAppTheme';
 
 const TeacherDashboard = ({ user, onLogout }) => {
@@ -23,18 +26,22 @@ const TeacherDashboard = ({ user, onLogout }) => {
     const [editingCourse, setEditingCourse] = useState(null);
     const [replyingDoubt, setReplyingDoubt] = useState(null);
     const [managingStudentsCourse, setManagingStudentsCourse] = useState(null);
+    const [removingStudent, setRemovingStudent] = useState(null); // {_id, name, enrolledCourseDetails}
+    const [chatCourseId, setChatCourseId] = useState(null); // courseId of open chat panel
 
     useEffect(() => { fetchOverviewData(); }, []);
     useEffect(() => {
         if (activeSection === 'students') fetchStudents();
         if (activeSection === 'courses') fetchCourses();
         if (activeSection === 'doubts') fetchDoubts();
+        if (activeSection === 'chat' && courses.length === 0) fetchCourses();
+        if (activeSection !== 'chat') setChatCourseId(null);
     }, [activeSection]);
 
     const fetchOverviewData = async () => {
         try {
             const [studentsRes, coursesRes, doubtsRes] = await Promise.all([
-                api.get('/auth/students'),
+                api.get('/auth/enrolled-students'),
                 api.get('/courses/teacher-courses'),
                 api.get('/doubts/all')
             ]);
@@ -51,9 +58,23 @@ const TeacherDashboard = ({ user, onLogout }) => {
 
     const fetchStudents = async () => {
         setLoading(true);
-        try { const res = await api.get('/auth/students'); setStudents(res.data.students); }
+        try { const res = await api.get('/auth/enrolled-students'); setStudents(res.data.students); }
         catch (error) { console.error('Error fetching students:', error); }
         finally { setLoading(false); }
+    };
+
+    const confirmRemoveStudent = async () => {
+        if (!removingStudent) return;
+        try {
+            const { _id, enrolledCourseDetails = [] } = removingStudent;
+            await Promise.all(enrolledCourseDetails.map(c => api.delete(`/courses/${c.courseId}/enroll/${_id}`)));
+            setStudents(prev => prev.filter(s => s._id !== _id));
+            setStats(prev => ({ ...prev, students: prev.students - 1 }));
+        } catch (err) {
+            console.error('Remove student error:', err);
+        } finally {
+            setRemovingStudent(null);
+        }
     };
 
     const fetchCourses = async () => {
@@ -109,55 +130,75 @@ const TeacherDashboard = ({ user, onLogout }) => {
 
         switch (activeSection) {
             case 'overview':
-                return (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
-                        {/* Stat cards */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-                            <StatCard icon={Users} label="Total Students" value={stats.students} color="#3b82f6" theme={theme} />
-                            <StatCard icon={BookOpen} label="Active Courses" value={stats.courses} color={accent.from} theme={theme} />
-                            <StatCard icon={MessageCircle} label="Pending Doubts" value={stats.doubts} color="#f43f5e" theme={theme} />
-                        </div>
-
-                        {/* Performance snapshot */}
-                        <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '24px', overflow: 'hidden' }}>
-                            <div style={{ height: '3px', background: aGrad, marginBottom: '20px', marginTop: '-24px', marginLeft: '-24px', marginRight: '-24px' }} />
-                            <h3 style={{ fontSize: '15px', fontWeight: 700, color: theme.textPrimary, margin: '0 0 6px', fontFamily: "'Sora', sans-serif" }}>Class Performance Snapshot</h3>
-                            <p style={{ fontSize: '13px', color: theme.textMuted, margin: '0 0 20px' }}>Overview of one of your active courses.</p>
-                            {courses.length > 0
-                                ? <TeacherAnalytics courses={[courses[0]]} />
-                                : <p style={{ color: theme.textMuted, fontSize: '13px' }}>No courses to display analytics for.</p>
-                            }
-                        </div>
-                    </div>
-                );
+                return <TeacherOverview courses={courses} />;
 
             case 'students':
                 return (
-                    <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', overflow: 'hidden' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                            <thead>
-                                <tr style={{ background: `${theme.bg}80` }}>
-                                    {['Name', 'Email', 'Role'].map(h => (
-                                        <th key={h} style={{ padding: '12px 20px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', borderBottom: `1px solid ${theme.border}` }}>{h}</th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {students.map((student, i) => (
-                                    <tr key={student._id} style={{ borderBottom: `1px solid ${theme.border}` }}
-                                        onMouseEnter={e => e.currentTarget.style.background = `${accent.from}06`}
-                                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                                    >
-                                        <td style={{ padding: '13px 20px', fontSize: '14px', fontWeight: 600, color: theme.textPrimary }}>{student.name}</td>
-                                        <td style={{ padding: '13px 20px', fontSize: '13px', color: theme.textSecondary }}>{student.email}</td>
-                                        <td style={{ padding: '13px 20px', fontSize: '12px', color: theme.textMuted, textTransform: 'capitalize' }}>{student.role}</td>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <p style={{ margin: 0, fontSize: '13px', color: theme.textMuted }}>
+                                {students.length} student{students.length !== 1 ? 's' : ''} enrolled across your courses
+                            </p>
+                            {courses.length > 0 && (
+                                <button onClick={() => setManagingStudentsCourse(courses[0])}
+                                    style={{ background: aGrad, border: 'none', color: '#fff', padding: '8px 16px', borderRadius: '10px', fontWeight: 700, fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', boxShadow: `0 4px 12px ${accent.glow}`, fontFamily: 'inherit' }}
+                                >
+                                    <Plus size={13} /> Add Students
+                                </button>
+                            )}
+                        </div>
+                        <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', overflow: 'hidden' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                <thead>
+                                    <tr style={{ background: `${theme.bg}80` }}>
+                                        {['Student', 'Email', 'Enrolled In', ''].map(h => (
+                                            <th key={h} style={{ padding: '12px 20px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', borderBottom: `1px solid ${theme.border}` }}>{h}</th>
+                                        ))}
                                     </tr>
-                                ))}
-                                {students.length === 0 && (
-                                    <tr><td colSpan={3} style={{ padding: '40px', textAlign: 'center', color: theme.textMuted, fontSize: '13px' }}>No students found.</td></tr>
-                                )}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    {students.map((student) => (
+                                        <tr key={student._id} style={{ borderBottom: `1px solid ${theme.border}` }}
+                                            onMouseEnter={e => e.currentTarget.style.background = `${accent.from}06`}
+                                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                        >
+                                            <td style={{ padding: '13px 20px' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: `${accent.from}18`, border: `1px solid ${accent.from}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 700, color: accent.from, flexShrink: 0 }}>
+                                                        {student.name ? student.name[0].toUpperCase() : 'S'}
+                                                    </div>
+                                                    <span style={{ fontSize: '14px', fontWeight: 600, color: theme.textPrimary }}>{student.name}</span>
+                                                </div>
+                                            </td>
+                                            <td style={{ padding: '13px 20px', fontSize: '13px', color: theme.textSecondary }}>{student.email}</td>
+                                            <td style={{ padding: '13px 20px' }}>
+                                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                                    {(student.enrolledCourses || []).map((title, idx) => (
+                                                        <span key={idx} style={{ fontSize: '11px', fontWeight: 600, color: accent.from, background: `${accent.from}12`, border: `1px solid ${accent.from}25`, borderRadius: '20px', padding: '3px 10px', whiteSpace: 'nowrap' }}>{title}</span>
+                                                    ))}
+                                                </div>
+                                            </td>
+                                            <td style={{ padding: '13px 20px', textAlign: 'right' }}>
+                                                <button
+                                                    onClick={() => setRemovingStudent(student)}
+                                                    title="Remove student"
+                                                    style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '8px', color: '#ef4444', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', padding: '5px 7px' }}
+                                                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.16)'; }}
+                                                    onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.08)'; }}
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {students.length === 0 && (
+                                        <tr><td colSpan={4} style={{ padding: '40px', textAlign: 'center', color: theme.textMuted, fontSize: '13px' }}>
+                                            No enrolled students yet. Add students from a course to see them here.
+                                        </td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 );
 
@@ -242,6 +283,53 @@ const TeacherDashboard = ({ user, onLogout }) => {
             case 'analytics':
                 return <TeacherAnalytics courses={courses} />;
 
+            case 'chat':
+                return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        <p style={{ margin: 0, fontSize: '13px', color: theme.textMuted }}>
+                            Select a class to open its chat. Each class has its own separate conversation.
+                        </p>
+                        {courses.length === 0 && (
+                            <div style={{ textAlign: 'center', color: theme.textMuted, padding: '48px', fontSize: '14px' }}>No courses yet.</div>
+                        )}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '14px' }}>
+                            {courses.map(course => {
+                                const isOpen = chatCourseId === course._id;
+                                return (
+                                    <button key={course._id}
+                                        onClick={() => setChatCourseId(isOpen ? null : course._id)}
+                                        style={{
+                                            background: isOpen ? `${accent.from}12` : theme.surface,
+                                            border: `1px solid ${isOpen ? accent.from : theme.border}`,
+                                            borderRadius: '14px', padding: '18px 20px', textAlign: 'left',
+                                            cursor: 'pointer', fontFamily: 'inherit', transition: 'all .15s',
+                                            display: 'flex', flexDirection: 'column', gap: '8px',
+                                        }}
+                                        onMouseEnter={e => { if (!isOpen) { e.currentTarget.style.borderColor = `${accent.from}50`; e.currentTarget.style.boxShadow = `0 4px 16px ${accent.from}12`; } }}
+                                        onMouseLeave={e => { if (!isOpen) { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.boxShadow = 'none'; } }}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: isOpen ? aGrad : `${accent.from}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                <MessagesSquare size={16} color={isOpen ? '#fff' : accent.from} />
+                                            </div>
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div style={{ fontSize: '14px', fontWeight: 700, color: theme.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{course.title}</div>
+                                                <div style={{ fontSize: '11px', color: theme.textMuted }}>{course.level}</div>
+                                            </div>
+                                        </div>
+                                        <div style={{ fontSize: '12px', fontWeight: 600, color: isOpen ? accent.from : theme.textMuted }}>
+                                            {isOpen ? '● Chat open' : 'Open chat →'}
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                );
+
+            case 'profile':
+                return <TeacherProfile />;
+
             default:
                 return null;
         }
@@ -253,6 +341,8 @@ const TeacherDashboard = ({ user, onLogout }) => {
         { icon: BookOpen, label: 'Courses', id: 'courses' },
         { icon: MessageCircle, label: 'Doubts', id: 'doubts' },
         { icon: BarChart, label: 'Analytics', id: 'analytics' },
+        { icon: MessagesSquare, label: 'Chat', id: 'chat' },
+        { icon: User2, label: 'Profile', id: 'profile' },
     ];
 
     return (
@@ -332,8 +422,10 @@ const TeacherDashboard = ({ user, onLogout }) => {
                 </header>
 
                 {/* Content */}
-                <div style={{ flex: 1, padding: '28px', overflowY: 'auto' }}>
-                    <h2 style={{ fontSize: '22px', fontWeight: 800, color: theme.textPrimary, margin: '0 0 22px', textTransform: 'capitalize', fontFamily: "'Sora', sans-serif" }}>{activeSection}</h2>
+                <div style={{ flex: 1, padding: (activeSection === 'profile' || activeSection === 'overview') ? '0' : '28px', overflowY: 'auto' }}>
+                    {activeSection !== 'profile' && activeSection !== 'overview' && (
+                        <h2 style={{ fontSize: '22px', fontWeight: 800, color: theme.textPrimary, margin: '0 0 22px', textTransform: 'capitalize', fontFamily: "'Sora', sans-serif" }}>{activeSection}</h2>
+                    )}
                     {renderContent()}
                 </div>
 
@@ -404,12 +496,49 @@ const TeacherDashboard = ({ user, onLogout }) => {
                     />
                 )}
 
+                {chatCourseId && user && (() => {
+                    const chatCourse = courses.find(c => c._id === chatCourseId);
+                    return (
+                        <ClassChat
+                            courseId={chatCourseId}
+                            courseTitle={chatCourse?.title}
+                            currentUser={{ id: user._id || user.id, name: user.name, role: user.role || 'teacher' }}
+                            onClose={() => setChatCourseId(null)}
+                        />
+                    );
+                })()}
+
                 {managingStudentsCourse && (
                     <ManageStudentsModal
                         course={managingStudentsCourse}
                         onClose={() => setManagingStudentsCourse(null)}
                         onUpdate={() => { fetchCourses(); setManagingStudentsCourse(null); }}
                     />
+                )}
+
+                {/* Remove Student Confirmation */}
+                {removingStudent && (
+                    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
+                        <div style={{ background: theme.surface, borderRadius: '18px', padding: '28px 32px', maxWidth: '420px', width: '90%', border: `1px solid ${theme.border}`, boxShadow: '0 20px 60px rgba(0,0,0,0.4)', textAlign: 'center' }}>
+                            <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                                <Trash2 size={20} color="#ef4444" />
+                            </div>
+                            <h3 style={{ fontSize: '16px', fontWeight: 700, color: theme.textPrimary, margin: '0 0 8px', fontFamily: "'Sora', sans-serif" }}>Remove Student?</h3>
+                            <p style={{ fontSize: '13px', color: theme.textSecondary, margin: '0 0 6px' }}>
+                                <strong>{removingStudent.name}</strong> will be removed from:
+                            </p>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'center', margin: '10px 0 20px' }}>
+                                {(removingStudent.enrolledCourseDetails || []).map(c => (
+                                    <span key={c.courseId} style={{ fontSize: '12px', fontWeight: 600, color: '#ef4444', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '20px', padding: '3px 10px' }}>{c.title}</span>
+                                ))}
+                            </div>
+                            <p style={{ fontSize: '12px', color: theme.textMuted, margin: '0 0 22px' }}>Their progress data will also be deleted. This cannot be undone.</p>
+                            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+                                <button onClick={() => setRemovingStudent(null)} style={{ padding: '9px 22px', borderRadius: '10px', border: `1px solid ${theme.border}`, background: 'transparent', color: theme.textSecondary, fontWeight: 600, fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+                                <button onClick={confirmRemoveStudent} style={{ padding: '9px 22px', borderRadius: '10px', border: 'none', background: 'linear-gradient(135deg,#ef4444,#dc2626)', color: '#fff', fontWeight: 700, fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 4px 12px rgba(239,68,68,0.3)' }}>Remove Student</button>
+                            </div>
+                        </div>
+                    </div>
                 )}
             </main>
         </div>

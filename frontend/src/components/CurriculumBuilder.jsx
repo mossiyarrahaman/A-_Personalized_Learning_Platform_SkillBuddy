@@ -1,7 +1,19 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Save, GripVertical, CheckSquare, Square, Upload, X, FileText, Calendar, Check, Edit } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Plus, Trash2, Save, GripVertical, CheckSquare, Square, Upload, X, FileText, Calendar, Edit, Zap, Brain } from 'lucide-react';
 import api from '../api/axios';
 import { useAppTheme } from '../hooks/useAppTheme';
+import TeacherQuizEditor from './TeacherQuizEditor';
+
+const BLOOM_LEVELS = [
+    { key: 'remember',   label: 'Remember' },
+    { key: 'understand', label: 'Understand' },
+    { key: 'apply',      label: 'Apply' },
+    { key: 'analyze',    label: 'Analyze' },
+    { key: 'evaluate',   label: 'Evaluate' },
+    { key: 'create',     label: 'Create' },
+    { key: 'mixed',      label: 'Mixed' },
+];
+const DIFFICULTIES = ['Beginner', 'Intermediate', 'Advanced'];
 
 const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}, initialTitle = '', initialDescription = '', onClose, onSave }) => {
     const { theme, accent } = useAppTheme();
@@ -9,11 +21,11 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
 
     const standardizeModules = (mods) => mods.map(m => ({
         ...m,
-        id: m.id || m._id || Math.random().toString(36).substr(2, 9),
+        id: m.id || m._id?.toString() || Math.random().toString(36).substr(2, 9),
         timePlan: m.timePlan || '',
         topics: m.topics.map(t => ({
             ...t,
-            id: t.id || t._id || Math.random().toString(36).substr(2, 9),
+            id: t.id || t._id?.toString() || Math.random().toString(36).substr(2, 9),
             isChecked: t.isChecked || false,
             teacherStatus: t.teacherStatus || 'not_covered'
         }))
@@ -31,7 +43,23 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
     const [newChecklistItem, setNewChecklistItem] = useState('');
     const [saving, setSaving] = useState(false);
 
+    // Quiz generation state
+    const [topicQuizStatus, setTopicQuizStatus] = useState({});  // { [topicId]: { difficulty, bloomLevel, questionCount } }
+    const [quizPanelOpen, setQuizPanelOpen] = useState(null);    // topicId with panel open
+    const [quizSettings, setQuizSettings] = useState({});        // { [topicId]: { difficulty, bloomLevel } }
+    const [quizGenerating, setQuizGenerating] = useState({});    // { [topicId]: boolean }
+    const [quizNumQs, setQuizNumQs] = useState({});              // { [topicId]: number }
+    const [quizEditorOpen, setQuizEditorOpen] = useState(null);  // { topicId, topicTitle } | null
+    const [publishingTopic, setPublishingTopic] = useState(null); // topicId currently being toggled
+
     useEffect(() => { setCourseTitle(initialTitle); setCourseDescription(initialDescription); }, [initialTitle, initialDescription]);
+
+    useEffect(() => {
+        if (!courseId) return;
+        api.get(`/rag/topic-quizzes/${courseId}`)
+            .then(res => { if (res.data.quizzes) setTopicQuizStatus(res.data.quizzes); })
+            .catch(() => {});
+    }, [courseId]);
 
     const addChecklistItem = () => {
         if (!newChecklistItem.trim()) return;
@@ -136,6 +164,44 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
             alert(error.response?.data?.error || 'Failed to save.');
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleGenerateQuiz = async (topic, module) => {
+        const settings = quizSettings[topic.id] || { difficulty: 'Intermediate', bloomLevel: 'understand' };
+        const numQuestions = quizNumQs[topic.id] || 10;
+        setQuizGenerating(g => ({ ...g, [topic.id]: true }));
+        try {
+            await api.post('/rag/generate-topic-quiz', {
+                courseId,
+                topicId: topic.id,
+                topicTitle: topic.title,
+                moduleTitle: module.title,
+                difficulty: settings.difficulty,
+                bloomLevel: settings.bloomLevel,
+                numQuestions,
+            });
+            setTopicQuizStatus(s => ({
+                ...s,
+                [topic.id]: { difficulty: settings.difficulty, bloomLevel: settings.bloomLevel, questionCount: numQuestions, published: false },
+            }));
+            setQuizPanelOpen(null);
+        } catch (err) {
+            alert(err.response?.data?.error || 'Failed to generate quiz. Make sure course materials are uploaded.');
+        } finally {
+            setQuizGenerating(g => ({ ...g, [topic.id]: false }));
+        }
+    };
+
+    const handlePublishQuiz = async (topicId, publish) => {
+        setPublishingTopic(topicId);
+        try {
+            await api.post('/rag/publish-quiz', { courseId, topicId, published: publish });
+            setTopicQuizStatus(s => ({ ...s, [topicId]: { ...s[topicId], published: publish } }));
+        } catch {
+            alert('Failed to update publish status. Please try again.');
+        } finally {
+            setPublishingTopic(null);
         }
     };
 
@@ -342,12 +408,109 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
                                                 <option value="completed">Completed</option>
                                             </select>
 
+                                            {/* Quiz status badge + Edit + Publish buttons */}
+                                            {topicQuizStatus[topic.id] && (
+                                                <>
+                                                    <span style={{ fontSize: '10px', fontWeight: 700, color: '#22c55e', background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: '20px', padding: '2px 8px', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                                                        ✓ Quiz Ready
+                                                    </span>
+                                                    <button
+                                                        onClick={() => setQuizEditorOpen({ topicId: topic.id, topicTitle: topic.title })}
+                                                        title="Edit quiz questions"
+                                                        style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'none', border: `1px solid ${theme.border}`, borderRadius: '6px', padding: '3px 8px', cursor: 'pointer', color: theme.textMuted, fontSize: '11px', fontWeight: 600, fontFamily: 'inherit', flexShrink: 0, transition: 'all .15s' }}
+                                                        onMouseEnter={e => { e.currentTarget.style.borderColor = accent.from; e.currentTarget.style.color = accent.from; }}
+                                                        onMouseLeave={e => { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.color = theme.textMuted; }}
+                                                    >
+                                                        <Edit size={11} /> Edit
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handlePublishQuiz(topic.id, !topicQuizStatus[topic.id].published)}
+                                                        disabled={publishingTopic === topic.id}
+                                                        title={topicQuizStatus[topic.id].published ? 'Unpublish quiz' : 'Publish quiz for students'}
+                                                        style={{ display: 'flex', alignItems: 'center', gap: '4px', background: topicQuizStatus[topic.id].published ? 'rgba(34,197,94,0.12)' : 'none', border: `1px solid ${topicQuizStatus[topic.id].published ? 'rgba(34,197,94,0.4)' : theme.border}`, borderRadius: '6px', padding: '3px 8px', cursor: publishingTopic === topic.id ? 'wait' : 'pointer', color: topicQuizStatus[topic.id].published ? '#22c55e' : theme.textMuted, fontSize: '11px', fontWeight: 700, fontFamily: 'inherit', flexShrink: 0, transition: 'all .15s' }}
+                                                    >
+                                                        {publishingTopic === topic.id ? '…' : topicQuizStatus[topic.id].published ? '✓ Published' : 'Publish'}
+                                                    </button>
+                                                </>
+                                            )}
+
+                                            {/* Generate Quiz button */}
+                                            <button
+                                                onClick={() => setQuizPanelOpen(quizPanelOpen === topic.id ? null : topic.id)}
+                                                title="Generate Quiz"
+                                                style={{ display: 'flex', alignItems: 'center', gap: '4px', background: quizPanelOpen === topic.id ? `${accent.from}18` : 'none', border: `1px solid ${quizPanelOpen === topic.id ? accent.from : theme.border}`, borderRadius: '6px', padding: '3px 8px', cursor: 'pointer', color: quizPanelOpen === topic.id ? accent.from : theme.textMuted, fontSize: '11px', fontWeight: 600, fontFamily: 'inherit', flexShrink: 0, transition: 'all .15s' }}
+                                                onMouseEnter={e => { if (quizPanelOpen !== topic.id) { e.currentTarget.style.borderColor = accent.from; e.currentTarget.style.color = accent.from; } }}
+                                                onMouseLeave={e => { if (quizPanelOpen !== topic.id) { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.color = theme.textMuted; } }}
+                                            >
+                                                <Brain size={11} /> Quiz
+                                            </button>
+
                                             <button onClick={() => handleDeleteTopic(mIndex, tIndex)}
                                                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: theme.textMuted, display: 'flex', flexShrink: 0, opacity: 0.6 }}
                                                 onMouseEnter={e => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.opacity = '1'; }}
                                                 onMouseLeave={e => { e.currentTarget.style.color = theme.textMuted; e.currentTarget.style.opacity = '0.6'; }}
                                             ><Trash2 size={14} /></button>
                                         </div>
+
+                                        {/* Quiz generation panel */}
+                                        {quizPanelOpen === topic.id && (
+                                            <div style={{ marginTop: '10px', background: `${accent.from}08`, border: `1px solid ${accent.from}25`, borderRadius: '10px', padding: '14px 16px' }}>
+                                                <div style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                    <Brain size={12} style={{ color: accent.from }} /> AI Quiz Generator
+                                                </div>
+                                                <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                                                    <div>
+                                                        <div style={{ fontSize: '10px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>Difficulty</div>
+                                                        <div style={{ display: 'flex', gap: '5px' }}>
+                                                            {DIFFICULTIES.map(d => {
+                                                                const active = (quizSettings[topic.id]?.difficulty || 'Intermediate') === d;
+                                                                return (
+                                                                    <button key={d} onClick={() => setQuizSettings(s => ({ ...s, [topic.id]: { ...(s[topic.id] || {}), difficulty: d } }))}
+                                                                        style={{ padding: '4px 10px', borderRadius: '6px', border: `1px solid ${active ? accent.from : theme.border}`, background: active ? `${accent.from}18` : 'none', color: active ? accent.from : theme.textSecondary, fontSize: '11px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', transition: 'all .15s' }}
+                                                                    >{d}</button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <div style={{ fontSize: '10px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>Bloom's Level</div>
+                                                        <select
+                                                            value={quizSettings[topic.id]?.bloomLevel || 'understand'}
+                                                            onChange={e => setQuizSettings(s => ({ ...s, [topic.id]: { ...(s[topic.id] || {}), bloomLevel: e.target.value } }))}
+                                                            style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '6px', padding: '5px 10px', fontSize: '12px', color: theme.textPrimary, outline: 'none', cursor: 'pointer', fontFamily: 'inherit' }}
+                                                        >
+                                                            {BLOOM_LEVELS.map(b => <option key={b.key} value={b.key}>{b.label}</option>)}
+                                                        </select>
+                                                    </div>
+                                                    <div>
+                                                        <div style={{ fontSize: '10px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>Questions</div>
+                                                        <div style={{ display: 'flex', gap: '5px' }}>
+                                                            {[5, 10, 15, 20].map(n => {
+                                                                const active = (quizNumQs[topic.id] || 10) === n;
+                                                                return (
+                                                                    <button key={n} onClick={() => setQuizNumQs(s => ({ ...s, [topic.id]: n }))}
+                                                                        style={{ padding: '4px 10px', borderRadius: '6px', border: `1px solid ${active ? accent.from : theme.border}`, background: active ? `${accent.from}18` : 'none', color: active ? accent.from : theme.textSecondary, fontSize: '11px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', transition: 'all .15s' }}
+                                                                    >{n}</button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => handleGenerateQuiz(topic, module)}
+                                                        disabled={quizGenerating[topic.id]}
+                                                        style={{ display: 'flex', alignItems: 'center', gap: '6px', background: quizGenerating[topic.id] ? theme.border : aGrad, border: 'none', color: '#fff', padding: '7px 16px', borderRadius: '8px', fontWeight: 700, fontSize: '12px', cursor: quizGenerating[topic.id] ? 'not-allowed' : 'pointer', fontFamily: 'inherit', boxShadow: quizGenerating[topic.id] ? 'none' : `0 3px 10px ${accent.glow}`, whiteSpace: 'nowrap' }}
+                                                    >
+                                                        <Zap size={12} />
+                                                        {quizGenerating[topic.id] ? 'Generating…' : topicQuizStatus[topic.id] ? 'Regenerate' : 'Generate Quiz'}
+                                                    </button>
+                                                </div>
+                                                {topicQuizStatus[topic.id] && (
+                                                    <div style={{ marginTop: '8px', fontSize: '11px', color: theme.textMuted }}>
+                                                        Current: <strong style={{ color: theme.textSecondary }}>{topicQuizStatus[topic.id].difficulty}</strong> · Bloom: <strong style={{ color: theme.textSecondary }}>{topicQuizStatus[topic.id].bloomLevel}</strong> · <strong style={{ color: theme.textSecondary }}>{topicQuizStatus[topic.id].questionCount || 10}</strong> questions
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
 
                                         {/* Resources */}
                                         <div style={{ marginLeft: '28px', borderLeft: `2px solid ${theme.border}`, paddingLeft: '14px', marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -462,6 +625,21 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
                     </div>
                 </div>
             )}
+
+            {/* Teacher Quiz Editor modal */}
+            {quizEditorOpen && (
+                <TeacherQuizEditor
+                    courseId={courseId}
+                    topicId={quizEditorOpen.topicId}
+                    topicTitle={quizEditorOpen.topicTitle}
+                    onClose={() => setQuizEditorOpen(null)}
+                    onUpdate={(count) => setTopicQuizStatus(s => ({
+                        ...s,
+                        [quizEditorOpen.topicId]: { ...s[quizEditorOpen.topicId], questionCount: count },
+                    }))}
+                />
+            )}
+
         </div>
     );
 };

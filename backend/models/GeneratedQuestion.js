@@ -63,6 +63,9 @@ const generatedQuestionSchema = new mongoose.Schema(
             index: true,
         },
 
+        // ── Topic reference ──────────────────────────────────────────────────
+        topicId: { type: String, index: true },   // Course topic ID (for teacher-generated quizzes)
+
         // ── Origin tracking ──────────────────────────────────────────────────
         origin: {
             type: String,

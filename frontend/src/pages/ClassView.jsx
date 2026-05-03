@@ -1,15 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronDown, ChevronUp, BookOpen, CheckCircle2, Check, Play, FileText, Brain, GraduationCap, Loader } from 'lucide-react';
+import { ChevronLeft, ChevronDown, ChevronUp, BookOpen, Check, Play, FileText, Brain, GraduationCap, Loader, Target, TrendingUp, MessageCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../api/axios';
 import ResourcePlayer from '../components/ResourcePlayer';
 import QuizModal from '../components/QuizModal';
+import ClassChat from '../components/ClassChat';
 import { useAppTheme } from '../hooks/useAppTheme';
+import { useAuth } from '../context/AuthContext';
 
 const ClassView = () => {
     const { courseId } = useParams();
     const navigate = useNavigate();
+    const { user } = useAuth();
     const { theme, accent } = useAppTheme();
     const aGrad = `linear-gradient(135deg,${accent.from},${accent.to})`;
 
@@ -20,18 +23,32 @@ const ClassView = () => {
     const [selectedResource, setSelectedResource] = useState(null);
     const [quizModalOpen, setQuizModalOpen] = useState(false);
     const [quizTarget, setQuizTarget] = useState(null);
+    const [topicQuizStatus, setTopicQuizStatus] = useState({});
+    const [chatOpen, setChatOpen] = useState(false);
 
     useEffect(() => { fetchClassDetails(); }, [courseId]);
 
     const fetchClassDetails = async () => {
         try {
-            const res = await api.get('/courses/student/enrolled-classes');
-            const foundClass = res.data.classes.find(c => c._id === courseId || c.id === courseId);
+            const [classRes, quizStatusRes] = await Promise.all([
+                api.get('/courses/student/enrolled-classes'),
+                api.get(`/rag/topic-quizzes/${courseId}`).catch(() => ({ data: { quizzes: {} } })),
+            ]);
+            const foundClass = classRes.data.classes.find(c => c._id === courseId || c.id === courseId);
             if (foundClass) {
                 setCourse(foundClass);
                 setProgress(foundClass.studentProgress);
-                if (foundClass.modules.length > 0) setExpandedModule(foundClass.modules[0]._id);
+                if (foundClass.modules.length > 0) setExpandedModule(prev => prev || foundClass.modules[0]._id);
             }
+            const quizzes = quizStatusRes.data.quizzes || {};
+            console.log('[ClassView] quiz status from API:', quizzes);
+            if (foundClass) {
+                foundClass.modules?.forEach(m => m.topics?.forEach(t => {
+                    const tKey = t.id || t._id?.toString();
+                    console.log(`[ClassView] topic "${t.title}" key="${tKey}" quizStatus=`, quizzes[tKey]);
+                }));
+            }
+            setTopicQuizStatus(quizzes);
         } catch (error) {
             console.error("Failed to load class", error);
         } finally {
@@ -74,44 +91,80 @@ const ClassView = () => {
     const totalTopics = course.modules.reduce((acc, m) => acc + m.topics.length, 0);
     const completedCount = progress?.completedTopics?.length || 0;
     const overallPct = totalTopics > 0 ? Math.round((completedCount / totalTopics) * 100) : 0;
+    const completedMods = course.modules.filter(m => m.topics.every(t => progress?.completedTopics?.includes(t._id))).length;
+
+    const statPills = [
+        { icon: TrendingUp, val: `${overallPct}%`, label: 'overall', color: accent.from },
+        { icon: Target, val: `${completedCount}/${totalTopics}`, label: 'topics done', color: '#34d399' },
+        { icon: BookOpen, val: `${completedMods}/${course.modules.length}`, label: 'modules done', color: '#60a5fa' },
+    ];
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', overflow: 'hidden', background: theme.bg, color: theme.textPrimary, fontFamily: "'DM Sans', sans-serif" }}>
 
-            {/* Header */}
-            <header style={{ background: theme.headerBg, backdropFilter: 'blur(12px)', borderBottom: `1px solid ${theme.border}`, padding: '0', position: 'sticky', top: 0, zIndex: 40, flexShrink: 0 }}>
-                <div style={{ maxWidth: '860px', margin: '0 auto', padding: '16px 24px' }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
-                        <button
-                            onClick={() => navigate('/my-courses')}
-                            style={{ padding: '8px', background: 'transparent', border: `1px solid ${theme.border}`, borderRadius: '10px', color: theme.textSecondary, cursor: 'pointer', display: 'flex', flexShrink: 0, transition: 'all .15s', marginTop: '2px' }}
-                            onMouseEnter={e => { e.currentTarget.style.background = theme.surface; e.currentTarget.style.color = theme.textPrimary; }}
-                            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = theme.textSecondary; }}
-                        >
-                            <ChevronLeft size={18} />
-                        </button>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '3px' }}>
-                                <GraduationCap size={13} style={{ color: accent.from, flexShrink: 0 }} />
-                                <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: accent.from }}>Teacher-Led Course</span>
-                            </div>
-                            <h1 style={{ fontSize: '18px', fontWeight: 800, color: theme.textPrimary, margin: '0 0 2px', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{course.title}</h1>
-                            <p style={{ fontSize: '12px', color: theme.textMuted, margin: 0 }}>{totalTopics} Topics · {course.level}</p>
+            {/* Back button — top-left, outside the hero */}
+            <div style={{ padding: '20px 24px 0' }}>
+                <button
+                    onClick={() => navigate('/my-courses')}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'none', border: 'none', color: theme.textSecondary, cursor: 'pointer', fontSize: '14px', fontWeight: 500, padding: 0, transition: 'color .15s', fontFamily: 'inherit' }}
+                    onMouseEnter={e => e.currentTarget.style.color = theme.textPrimary}
+                    onMouseLeave={e => e.currentTarget.style.color = theme.textSecondary}
+                >
+                    <ChevronLeft size={18} /> Back to My Learning
+                </button>
+            </div>
 
-                            {/* Progress bar */}
-                            <div style={{ marginTop: '10px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: theme.textMuted, marginBottom: '4px' }}>
-                                    <span>{completedCount}/{totalTopics} topics completed</span>
-                                    <span style={{ fontWeight: 700, color: overallPct === 100 ? '#22c55e' : accent.from }}>{overallPct}%</span>
-                                </div>
-                                <div style={{ height: '4px', background: theme.surface2, borderRadius: '4px', overflow: 'hidden' }}>
-                                    <div style={{ height: '100%', width: `${overallPct}%`, background: overallPct === 100 ? '#22c55e' : aGrad, borderRadius: '4px', transition: 'width .6s ease' }} />
-                                </div>
-                            </div>
+            {/* Hero header */}
+            <div style={{ background: theme.surface, borderBottom: `1px solid ${theme.border}`, padding: '2rem 1rem 1.75rem', textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
+                {/* Top gradient bar */}
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: `linear-gradient(to right, ${accent.from}, ${accent.to}, #22c55e)` }} />
+                {/* Glow blob */}
+                <div style={{ position: 'absolute', top: '-40px', left: '50%', transform: 'translateX(-50%)', width: '400px', height: '200px', background: `${accent.from}10`, borderRadius: '50%', filter: 'blur(50px)', pointerEvents: 'none' }} />
+
+                {/* Label */}
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginBottom: '8px', position: 'relative' }}>
+                    <GraduationCap size={13} style={{ color: accent.from }} />
+                    <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: accent.from }}>Teacher-Led Course</span>
+                </div>
+
+                {/* Title */}
+                <h1 style={{ fontFamily: "'Sora', sans-serif", fontSize: 'clamp(1.4rem,4vw,2.2rem)', fontWeight: 800, marginBottom: '6px', position: 'relative' }}>
+                    <span style={{ background: aGrad, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text', color: 'transparent' }}>
+                        {course.title}
+                    </span>
+                </h1>
+                <p style={{ fontSize: '13px', color: theme.textSecondary, margin: '0 auto 1.25rem', lineHeight: 1.6, position: 'relative' }}>
+                    {totalTopics} topics · {course.level} · Progress through each module to complete the course.
+                </p>
+
+                {/* Stats pills */}
+                <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '1.25rem', position: 'relative' }}>
+                    {statPills.map(({ icon: Icon, val, label, color }) => (
+                        <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '7px', background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '7px 14px' }}>
+                            <Icon size={14} style={{ color }} />
+                            <span style={{ fontFamily: "'Sora', sans-serif", fontSize: '13px', fontWeight: 700, color: theme.textPrimary }}>{val}</span>
+                            <span style={{ fontSize: '11px', color: theme.textMuted }}>{label}</span>
                         </div>
+                    ))}
+                </div>
+
+                {/* Overall progress bar */}
+                <div style={{ maxWidth: '400px', margin: '0 auto', position: 'relative' }}>
+                    <div style={{ height: '6px', background: theme.border, borderRadius: '4px', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${overallPct}%`, background: overallPct === 100 ? '#22c55e' : aGrad, borderRadius: '4px', transition: 'width 1s ease' }} />
                     </div>
                 </div>
-            </header>
+
+                {/* Chat button */}
+                <div style={{ marginTop: '16px', position: 'relative' }}>
+                    <button
+                        onClick={() => setChatOpen(true)}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '8px 18px', borderRadius: '20px', border: 'none', background: aGrad, color: '#fff', fontWeight: 700, fontSize: '13px', cursor: 'pointer', boxShadow: `0 4px 14px ${accent.from}40`, fontFamily: 'inherit' }}
+                    >
+                        <MessageCircle size={15} /> Class Chat
+                    </button>
+                </div>
+            </div>
 
             {/* Main content */}
             <main style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
@@ -233,7 +286,22 @@ const ClassView = () => {
                                                                     </div>
                                                                 )}
 
-                                                                {/* Quiz button */}
+                                                                {/* Quiz buttons */}
+                                                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                                                {(() => { const tKey = topic.id || topic._id?.toString(); return topicQuizStatus[tKey]?.published; })() && (
+                                                                    <button
+                                                                        onClick={() => { const tKey = topic.id || topic._id?.toString(); setQuizTarget({ moduleId: module._id, topicId: tKey, topicTitle: topic.title }); setQuizModalOpen(true); }}
+                                                                        style={{
+                                                                            display: 'inline-flex', alignItems: 'center', gap: '5px',
+                                                                            padding: '4px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 700,
+                                                                            background: `linear-gradient(135deg,${accent.from},${accent.to})`,
+                                                                            border: 'none', color: '#fff', cursor: 'pointer', fontFamily: 'inherit',
+                                                                            boxShadow: `0 2px 8px ${accent.from}35`,
+                                                                        }}
+                                                                    >
+                                                                        📝 Take Test/Quiz
+                                                                    </button>
+                                                                )}
                                                                 <button
                                                                     onClick={() => { setQuizTarget({ moduleId: module._id, topicId: topic._id || topic.id, topicTitle: topic.title }); setQuizModalOpen(true); }}
                                                                     style={{
@@ -247,6 +315,7 @@ const ClassView = () => {
                                                                 >
                                                                     <Brain size={12} /> Generate Quiz with AI
                                                                 </button>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     );
@@ -273,12 +342,21 @@ const ClassView = () => {
 
             <QuizModal
                 isOpen={quizModalOpen}
-                onClose={() => setQuizModalOpen(false)}
+                onClose={() => { setQuizModalOpen(false); fetchClassDetails(); }}
                 courseId={courseId}
                 moduleId={quizTarget?.moduleId}
                 topicId={quizTarget?.topicId}
                 topicTitle={quizTarget?.topicTitle || ''}
+                onComplete={() => fetchClassDetails()}
             />
+
+            {chatOpen && user && (
+                <ClassChat
+                    courseId={courseId}
+                    currentUser={{ id: user._id || user.id, name: user.name, role: user.role || 'student' }}
+                    onClose={() => setChatOpen(false)}
+                />
+            )}
         </div>
     );
 };

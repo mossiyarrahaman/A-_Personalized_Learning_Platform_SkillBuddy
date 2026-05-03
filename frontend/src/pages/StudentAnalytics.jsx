@@ -1,12 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-    LineChart, Line, CartesianGrid, Cell, PieChart, Pie
+    LineChart, Line, CartesianGrid
 } from 'recharts';
 import {
     Clock, BookOpen, Trophy, Brain, Target, Flame,
-    TrendingUp, XCircle, AlertTriangle, CheckCircle,
-    Zap, Star, Calendar
+    TrendingUp, AlertTriangle, CheckCircle
 } from 'lucide-react';
 import api from '../api/axios';
 import { useAppTheme } from '../hooks/useAppTheme';
@@ -48,7 +47,7 @@ const Empty = ({ icon, msg, theme, onAction, actionLabel, accent }) => (
     </div>
 );
 
-const StatusBadge = ({ progress, theme }) => {
+const StatusBadge = ({ progress }) => {
     const [c, l] = progress === 100 ? ['#34d399', '✓ Complete'] : progress >= 50 ? ['#fbbf24', 'In Progress'] : progress > 0 ? ['#60a5fa', 'Started'] : ['#6b7280', 'Not Started'];
     return <span style={{ fontSize: '11px', fontWeight: 700, color: c, background: `${c}15`, border: `1px solid ${c}30`, borderRadius: '20px', padding: '3px 9px' }}>{l}</span>;
 };
@@ -60,6 +59,10 @@ const StudentAnalytics = () => {
     const [data, setData] = useState(null);
     const [quizModal, setQuizModal] = useState(null);
     const [tab, setTab] = useState('overview');
+    const [courseIdx, setCourseIdx] = useState(0);
+    const [courseType, setCourseType] = useState('teacher');
+    const [aiModuleIdx, setAiModuleIdx] = useState(0);
+    const [reviewIdx, setReviewIdx] = useState(null);
 
     const aGrad = `linear-gradient(135deg,${accent.from},${accent.to})`;
     const card = { background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '20px', transition: 'border-color .2s' };
@@ -82,8 +85,14 @@ const StudentAnalytics = () => {
             // ── Course progress ──
             const courseProgress = courses.map(c => {
                 const total = c.modules.reduce((a, m) => a + (m.topics?.length || 0), 0);
-                const done = c.studentProgress?.completedTopics?.length || 0;
-                return { name: c.title.length > 15 ? c.title.slice(0, 15) + '…' : c.title, fullName: c.title, progress: total > 0 ? Math.round((done / total) * 100) : 0, completed: done, total, level: c.level };
+                const completedTopics = c.studentProgress?.completedTopics || [];
+                const done = completedTopics.length;
+                const moduleBreakdown = (c.modules || []).map(m => {
+                    const mTotal = m.topics?.length || 0;
+                    const mDone = m.topics?.filter(t => completedTopics.includes(t._id || t.id)).length || 0;
+                    return { title: m.title, done: mDone, total: mTotal, pct: mTotal > 0 ? Math.round((mDone / mTotal) * 100) : 0 };
+                });
+                return { name: c.title.length > 15 ? c.title.slice(0, 15) + '…' : c.title, fullName: c.title, progress: total > 0 ? Math.round((done / total) * 100) : 0, completed: done, total, level: c.level, moduleBreakdown };
             });
 
             // ── AI path module progress ──
@@ -133,7 +142,7 @@ const StudentAnalytics = () => {
 
             // ── Daily study hours (simulated from completedTopics timestamps or profile) ──
             const hoursStudied = profile?.stats?.hoursStudied || stats?.hoursStudied || 0;
-            const dailyHours = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, i) => ({
+            const dailyHours = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => ({
                 day, hours: Number((hoursStudied / 7 * (0.5 + Math.random() * 1)).toFixed(1))
             }));
 
@@ -154,6 +163,14 @@ const StudentAnalytics = () => {
             quizResults.forEach(r => { const d = r.difficulty || 'Intermediate'; if (diffMap[d]) { diffMap[d].count++; diffMap[d].total += r.pct || 0; } });
             const diffBreakdown = Object.entries(diffMap).map(([name, v]) => ({ name, avgScore: v.count > 0 ? Math.round(v.total / v.count) : 0, count: v.count }));
 
+            // ── Score improvement (first 5 vs recent 5) ──
+            const newestFirst = [...quizScores]; // already newest first
+            const recentSlice = newestFirst.slice(0, Math.min(5, newestFirst.length));
+            const earlierSlice = newestFirst.length > 5 ? newestFirst.slice(-Math.min(5, newestFirst.length - 1)) : [];
+            const recentAvg = recentSlice.length ? Math.round(recentSlice.reduce((a, q) => a + q.score, 0) / recentSlice.length) : null;
+            const earlierAvg = earlierSlice.length ? Math.round(earlierSlice.reduce((a, q) => a + q.score, 0) / earlierSlice.length) : null;
+            const improvementDelta = (recentAvg !== null && earlierAvg !== null) ? recentAvg - earlierAvg : null;
+
             // ── Topic mastery pie (done vs remaining for AI path) ──
             const aiTotal = aiModules.reduce((a, m) => a + (m.topics?.length || 0), 0);
             const aiDone = aiModules.reduce((a, m) => a + (m.topics?.filter(t => t.status === 'completed').length || 0), 0);
@@ -162,7 +179,7 @@ const StudentAnalytics = () => {
             const totalTopics = courses.reduce((a, c) => a + c.modules.reduce((b, m) => b + (m.topics?.length || 0), 0), 0);
             const avgScore = quizScores.length > 0 ? Math.round(quizScores.reduce((a, q) => a + q.score, 0) / quizScores.length) : 0;
 
-            setData({ stats, courses, courseProgress, aiProgress, topicMastery, quizScores, scoreTrend, weeklyActivity, dailyHours, mistakeTopics, diffBreakdown, totalCompleted, totalTopics, avgScore, hoursStudied, aiDone, aiTotal });
+            setData({ stats, courses, courseProgress, aiProgress, aiModules, topicMastery, quizScores, scoreTrend, weeklyActivity, dailyHours, mistakeTopics, diffBreakdown, totalCompleted, totalTopics, avgScore, hoursStudied, aiDone, aiTotal, recentAvg, earlierAvg, improvementDelta });
         } catch (err) {
             console.error('Analytics error', err);
         } finally {
@@ -288,35 +305,121 @@ const StudentAnalytics = () => {
                         ) : <Empty icon="📈" msg="Take quizzes to see your score trend" theme={theme} onAction={() => setQuizModal({ topicTitle: 'General Knowledge' })} actionLabel="Take Quiz" accent={accent} />}
                     </div>
 
-                    {/* Topic mastery pie */}
+                    {/* Course Progress */}
                     <div style={card}>
-                        <SectionTitle title="Topic Mastery" sub="AI path completion" theme={theme} />
-                        {data.aiTotal > 0 ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-                                <div style={{ position: 'relative', width: '130px', height: '130px', flexShrink: 0 }}>
-                                    <svg viewBox="0 0 130 130" style={{ width: '130px', height: '130px', transform: 'rotate(-90deg)' }}>
-                                        <circle cx="65" cy="65" r="52" fill="none" stroke={theme.border} strokeWidth="14" />
-                                        <circle cx="65" cy="65" r="52" fill="none" stroke={accent.from} strokeWidth="14"
-                                            strokeDasharray={`${(data.aiDone / data.aiTotal) * 327} 327`}
-                                            strokeLinecap="round" style={{ transition: 'stroke-dasharray .8s ease' }} />
-                                    </svg>
-                                    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                                        <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: '1.3rem', color: theme.textPrimary, lineHeight: 1 }}>{data.aiTotal > 0 ? Math.round((data.aiDone / data.aiTotal) * 100) : 0}%</div>
-                                        <div style={{ fontSize: '10px', color: theme.textMuted }}>done</div>
-                                    </div>
-                                </div>
-                                <div>
-                                    {[['Completed', data.aiDone, '#34d399'], ['Remaining', data.aiTotal - data.aiDone, theme.textMuted]].map(([l, v, c]) => (
-                                        <div key={l} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                                            <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: c, flexShrink: 0 }} />
-                                            <span style={{ fontSize: '13px', color: theme.textSecondary }}>{l}</span>
-                                            <span style={{ fontWeight: 700, color: theme.textPrimary, marginLeft: 'auto', paddingLeft: '12px' }}>{v}</span>
+                        <SectionTitle title="Course Progress" sub="Select a course type to view details" theme={theme} />
+                        {/* Type switcher */}
+                        <div style={{ display: 'flex', gap: '6px', marginBottom: '14px' }}>
+                            {[['teacher', '🎓 Teacher-Led'], ['ai', '🤖 AI Learning']].map(([key, label]) => (
+                                <button key={key} onClick={() => setCourseType(key)} style={{ padding: '4px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: 600, background: courseType === key ? aGrad : theme.bg, color: courseType === key ? '#fff' : theme.textSecondary, border: `1px solid ${courseType === key ? 'transparent' : theme.border}`, cursor: 'pointer', transition: 'all .2s', fontFamily: "'DM Sans',sans-serif" }}>
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+
+                        {courseType === 'teacher' ? (
+                            data.courseProgress.length > 0 ? (() => {
+                                const sel = data.courseProgress[Math.min(courseIdx, data.courseProgress.length - 1)];
+                                const pct = sel.progress;
+                                const ringColor = pct === 100 ? '#22c55e' : accent.from;
+                                return (
+                                    <>
+                                        {/* Course selector pills — always shown */}
+                                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '14px' }}>
+                                            {data.courseProgress.map((c, i) => (
+                                                <button key={i} onClick={() => setCourseIdx(i)} style={{ padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600, background: courseIdx === i ? aGrad : theme.bg, color: courseIdx === i ? '#fff' : theme.textSecondary, border: `1px solid ${courseIdx === i ? 'transparent' : theme.border}`, cursor: 'pointer', transition: 'all .2s', fontFamily: "'DM Sans',sans-serif" }}>
+                                                    {c.name}
+                                                </button>
+                                            ))}
                                         </div>
-                                    ))}
-                                    <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '8px' }}>{data.aiDone} of {data.aiTotal} topics</div>
-                                </div>
-                            </div>
-                        ) : <Empty icon="🗺️" msg="Generate an AI path to track mastery" theme={theme} />}
+                                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
+                                            {/* Donut */}
+                                            <div style={{ position: 'relative', width: '110px', height: '110px', flexShrink: 0 }}>
+                                                <svg viewBox="0 0 130 130" style={{ width: '110px', height: '110px', transform: 'rotate(-90deg)' }}>
+                                                    <circle cx="65" cy="65" r="52" fill="none" stroke={theme.border} strokeWidth="14" />
+                                                    <circle cx="65" cy="65" r="52" fill="none" stroke={ringColor} strokeWidth="14"
+                                                        strokeDasharray={`${(pct / 100) * 327} 327`}
+                                                        strokeLinecap="round" style={{ transition: 'stroke-dasharray .8s ease' }} />
+                                                </svg>
+                                                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                                                    <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: '1.15rem', color: theme.textPrimary, lineHeight: 1 }}>{pct}%</div>
+                                                    <div style={{ fontSize: '9px', color: theme.textMuted }}>done</div>
+                                                </div>
+                                            </div>
+                                            {/* Module breakdown */}
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div style={{ fontSize: '12px', fontWeight: 700, color: theme.textPrimary, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sel.fullName}</div>
+                                                <div style={{ fontSize: '10px', color: theme.textMuted, marginBottom: '10px' }}>{sel.completed}/{sel.total} topics · <span style={{ background: `${accent.from}18`, color: accent.from, padding: '1px 6px', borderRadius: '20px', fontWeight: 600 }}>{sel.level}</span></div>
+                                                {(sel.moduleBreakdown || []).slice(0, 4).map((m, i) => (
+                                                    <div key={i} style={{ marginBottom: '7px' }}>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: theme.textSecondary, marginBottom: '2px' }}>
+                                                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>{m.title}</span>
+                                                            <span style={{ fontWeight: 700, color: m.pct === 100 ? '#22c55e' : theme.textMuted, flexShrink: 0, paddingLeft: '6px' }}>{m.done}/{m.total}</span>
+                                                        </div>
+                                                        <div style={{ height: '3px', background: theme.border, borderRadius: '2px', overflow: 'hidden' }}>
+                                                            <div style={{ height: '100%', width: `${m.pct}%`, background: m.pct === 100 ? '#22c55e' : aGrad, borderRadius: '2px', transition: 'width .6s ease' }} />
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                                {(sel.moduleBreakdown || []).length > 4 && (
+                                                    <div style={{ fontSize: '10px', color: theme.textMuted }}>+{sel.moduleBreakdown.length - 4} more modules</div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </>
+                                );
+                            })() : <Empty icon="📚" msg="Enroll in courses to track progress" theme={theme} />
+                        ) : (
+                            data.aiProgress.length > 0 ? (() => {
+                                const clampedIdx = Math.min(aiModuleIdx, data.aiProgress.length - 1);
+                                const selMod = data.aiProgress[clampedIdx];
+                                const selTopics = (data.aiModules[clampedIdx]?.topics) || [];
+                                const ringColor = selMod.pct === 100 ? '#22c55e' : accent.from;
+                                return (
+                                    <>
+                                        {/* Module selector pills */}
+                                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '14px' }}>
+                                            {data.aiProgress.map((m, i) => (
+                                                <button key={i} onClick={() => setAiModuleIdx(i)} style={{ padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600, background: aiModuleIdx === i ? aGrad : theme.bg, color: aiModuleIdx === i ? '#fff' : theme.textSecondary, border: `1px solid ${aiModuleIdx === i ? 'transparent' : theme.border}`, cursor: 'pointer', transition: 'all .2s', fontFamily: "'DM Sans',sans-serif" }}>
+                                                    {m.name}
+                                                </button>
+                                            ))}
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
+                                            {/* Donut */}
+                                            <div style={{ position: 'relative', width: '110px', height: '110px', flexShrink: 0 }}>
+                                                <svg viewBox="0 0 130 130" style={{ width: '110px', height: '110px', transform: 'rotate(-90deg)' }}>
+                                                    <circle cx="65" cy="65" r="52" fill="none" stroke={theme.border} strokeWidth="14" />
+                                                    <circle cx="65" cy="65" r="52" fill="none" stroke={ringColor} strokeWidth="14"
+                                                        strokeDasharray={`${(selMod.pct / 100) * 327} 327`}
+                                                        strokeLinecap="round" style={{ transition: 'stroke-dasharray .8s ease' }} />
+                                                </svg>
+                                                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                                                    <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: '1.15rem', color: theme.textPrimary, lineHeight: 1 }}>{selMod.pct}%</div>
+                                                    <div style={{ fontSize: '9px', color: theme.textMuted }}>done</div>
+                                                </div>
+                                            </div>
+                                            {/* Topic list */}
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div style={{ fontSize: '12px', fontWeight: 700, color: theme.textPrimary, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{data.aiModules[clampedIdx]?.title || selMod.name}</div>
+                                                <div style={{ fontSize: '10px', color: theme.textMuted, marginBottom: '10px' }}>{selMod.done}/{selMod.total} topics · <span style={{ background: `${accent.from}18`, color: accent.from, padding: '1px 6px', borderRadius: '20px', fontWeight: 600 }}>AI Module</span></div>
+                                                {selTopics.slice(0, 5).map((t, i) => (
+                                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '6px' }}>
+                                                        <div style={{ width: '14px', height: '14px', borderRadius: '50%', border: `2px solid ${t.status === 'completed' ? '#22c55e' : theme.border}`, background: t.status === 'completed' ? '#22c55e' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                            {t.status === 'completed' && <span style={{ color: '#fff', fontSize: '8px', fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                                                        </div>
+                                                        <span style={{ fontSize: '11px', color: t.status === 'completed' ? theme.textMuted : theme.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: t.status === 'completed' ? 'line-through' : 'none' }}>{t.title}</span>
+                                                    </div>
+                                                ))}
+                                                {selTopics.length > 5 && (
+                                                    <div style={{ fontSize: '10px', color: theme.textMuted }}>+{selTopics.length - 5} more topics</div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </>
+                                );
+                            })() : <Empty icon="🗺️" msg="Generate an AI learning path first from the Dashboard" theme={theme} />
+                        )}
                     </div>
 
                     {/* Weekly quiz activity */}
@@ -333,22 +436,45 @@ const StudentAnalytics = () => {
                         </ResponsiveContainer>
                     </div>
 
-                    {/* Score by difficulty */}
+                    {/* Score Improvement */}
                     <div style={card}>
-                        <SectionTitle title="Score by Difficulty" sub="Average score per level" theme={theme} />
-                        {data.diffBreakdown.some(d => d.count > 0) ? (
-                            <ResponsiveContainer width="100%" height={180}>
-                                <BarChart data={data.diffBreakdown}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme.border} />
-                                    <XAxis dataKey="name" stroke={theme.textMuted} tick={{ fontSize: 11, fill: theme.textSecondary }} />
-                                    <YAxis domain={[0, 100]} stroke={theme.textMuted} tick={{ fontSize: 10, fill: theme.textMuted }} tickFormatter={v => `${v}%`} />
-                                    <Tooltip content={<CTip theme={theme} />} />
-                                    <Bar dataKey="avgScore" name="Avg Score" radius={[5, 5, 0, 0]} barSize={34}>
-                                        {data.diffBreakdown.map((d, i) => <Cell key={i} fill={['#34d399', '#fbbf24', '#f87171'][i]} />)}
-                                    </Bar>
-                                </BarChart>
-                            </ResponsiveContainer>
-                        ) : <Empty icon="🎯" msg="Take quizzes at different difficulty levels" theme={theme} onAction={() => setQuizModal({ topicTitle: 'General Knowledge' })} actionLabel="Try Hard Mode" accent={accent} />}
+                        <SectionTitle title="Score Improvement" sub="Are your quiz scores getting better?" theme={theme} />
+                        {data.quizScores.length >= 2 ? (() => {
+                            const delta = data.improvementDelta;
+                            const isImproving = delta !== null && delta > 0;
+                            const isDeclining = delta !== null && delta < 0;
+                            const deltaColor = isImproving ? '#34d399' : isDeclining ? '#f87171' : '#fbbf24';
+                            const deltaLabel = isImproving ? '↑ Improving' : isDeclining ? '↓ Needs focus' : '→ Steady';
+                            const message = isImproving
+                                ? `Your scores went up by ${Math.abs(delta)} points. Your study efforts are paying off!`
+                                : isDeclining
+                                    ? `Your recent scores dropped by ${Math.abs(delta)} points. Review your mistake areas.`
+                                    : 'Your performance is consistent. Push for higher scores by reviewing weak topics.';
+                            return (
+                                <div>
+                                    {/* Comparison */}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                                        <div style={{ flex: 1, textAlign: 'center', padding: '14px', background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '12px' }}>
+                                            <div style={{ fontSize: '10px', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>Earlier Avg</div>
+                                            <div style={{ fontFamily: "'Sora',sans-serif", fontSize: '1.5rem', fontWeight: 800, color: theme.textSecondary, lineHeight: 1 }}>{data.earlierAvg ?? '—'}%</div>
+                                        </div>
+                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                                            <div style={{ fontSize: '1.3rem', fontWeight: 800, color: deltaColor }}>{delta !== null ? (delta > 0 ? `+${delta}` : delta) : '—'}</div>
+                                            <div style={{ fontSize: '10px', fontWeight: 700, color: deltaColor, background: `${deltaColor}15`, border: `1px solid ${deltaColor}30`, borderRadius: '20px', padding: '2px 8px', whiteSpace: 'nowrap' }}>{deltaLabel}</div>
+                                        </div>
+                                        <div style={{ flex: 1, textAlign: 'center', padding: '14px', background: `${deltaColor}08`, border: `1px solid ${deltaColor}30`, borderRadius: '12px' }}>
+                                            <div style={{ fontSize: '10px', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>Recent Avg</div>
+                                            <div style={{ fontFamily: "'Sora',sans-serif", fontSize: '1.5rem', fontWeight: 800, color: deltaColor, lineHeight: 1 }}>{data.recentAvg ?? '—'}%</div>
+                                        </div>
+                                    </div>
+                                    {/* Progress bar showing recent avg */}
+                                    <div style={{ height: '6px', background: theme.border, borderRadius: '4px', overflow: 'hidden', marginBottom: '10px' }}>
+                                        <div style={{ height: '100%', width: `${data.recentAvg || 0}%`, background: `linear-gradient(to right,${deltaColor}80,${deltaColor})`, borderRadius: '4px', transition: 'width 1s ease' }} />
+                                    </div>
+                                    <p style={{ fontSize: '12px', color: theme.textSecondary, lineHeight: 1.5, margin: 0 }}>{message}</p>
+                                </div>
+                            );
+                        })() : <Empty icon="📈" msg="Take at least 2 quizzes to see your improvement trend" theme={theme} onAction={() => setQuizModal({ topicTitle: 'General Knowledge' })} actionLabel="Take Quiz" accent={accent} />}
                     </div>
 
                     {/* Top needs review */}
@@ -523,7 +649,7 @@ const StudentAnalytics = () => {
                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                                 <thead>
                                     <tr style={{ borderBottom: `1px solid ${theme.border}` }}>
-                                        {['Topic', 'Difficulty', 'Score', 'Correct', 'Time', 'Grade', 'Action'].map(h => (
+                                        {['Topic', 'Difficulty', 'Score', 'Correct', 'Time', 'Grade', 'Actions'].map(h => (
                                             <th key={h} style={{ padding: '9px 11px', textAlign: 'left', color: theme.textMuted, fontWeight: 600, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</th>
                                         ))}
                                     </tr>
@@ -553,7 +679,10 @@ const StudentAnalytics = () => {
                                                 </span>
                                             </td>
                                             <td style={{ padding: '11px' }}>
-                                                <button onClick={() => setQuizModal({ topicTitle: q.topic })} style={{ background: `${accent.from}15`, border: `1px solid ${accent.from}35`, borderRadius: '6px', padding: '4px 9px', color: accent.from, fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>Retry</button>
+                                                <div style={{ display: 'flex', gap: '6px' }}>
+                                                    <button onClick={() => setReviewIdx(i)} style={{ background: `${accent.from}15`, border: `1px solid ${accent.from}35`, borderRadius: '6px', padding: '4px 9px', color: accent.from, fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>Review</button>
+                                                    <button onClick={() => setQuizModal({ topicTitle: q.topic })} style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '6px', padding: '4px 9px', color: theme.textSecondary, fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>Retry</button>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}
@@ -596,6 +725,85 @@ const StudentAnalytics = () => {
                     )}
                 </div>
             )}
+
+            {/* ── QUIZ REVIEW MODAL ── */}
+            {reviewIdx !== null && data?.quizScores[reviewIdx] && (() => {
+                const q = data.quizScores[reviewIdx];
+                const dateStr = q.completedAt ? new Date(q.completedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+                const scoreColor = q.score >= 80 ? '#34d399' : q.score >= 60 ? '#fbbf24' : '#f87171';
+                return (
+                    <div onClick={() => setReviewIdx(null)}
+                        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}>
+                        <div onClick={e => e.stopPropagation()}
+                            style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '18px', width: '100%', maxWidth: '580px', maxHeight: '82vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 60px rgba(0,0,0,0.4)' }}>
+
+                            {/* Header */}
+                            <div style={{ padding: '20px 24px 16px', borderBottom: `1px solid ${theme.border}`, display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: '15px', fontWeight: 700, color: theme.textPrimary, marginBottom: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{q.topic}</h2>
+                                    <p style={{ fontSize: '11px', color: theme.textMuted }}>{dateStr}{dateStr && ' · '}{q.difficulty}{q.timeTaken > 0 ? ` · ${Math.floor(q.timeTaken / 60)}:${String(q.timeTaken % 60).padStart(2, '0')}` : ''}</p>
+                                </div>
+                                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                                    <div style={{ fontFamily: "'Sora',sans-serif", fontSize: '1.4rem', fontWeight: 800, color: scoreColor, lineHeight: 1 }}>{q.score}%</div>
+                                    <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>{q.correct}/{q.total} correct</div>
+                                </div>
+                                <button onClick={() => setReviewIdx(null)}
+                                    style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '5px 10px', color: theme.textSecondary, fontSize: '13px', cursor: 'pointer', flexShrink: 0 }}>✕</button>
+                            </div>
+
+                            {/* Scrollable body */}
+                            <div style={{ overflowY: 'auto', padding: '18px 24px', flex: 1 }}>
+                                {q.mistakes?.length > 0 ? (
+                                    <>
+                                        <p style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: theme.textMuted, marginBottom: '14px' }}>
+                                            {q.mistakes.length} mistake{q.mistakes.length !== 1 ? 's' : ''} to review
+                                        </p>
+                                        {q.mistakes.map((m, mi) => (
+                                            <div key={mi} style={{ marginBottom: '14px', padding: '14px', background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '12px' }}>
+                                                <p style={{ fontSize: '13px', fontWeight: 600, color: theme.textPrimary, marginBottom: '10px', lineHeight: 1.55 }}>Q{mi + 1}. {m.question}</p>
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                                    <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', padding: '8px 12px', background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: '8px' }}>
+                                                        <span style={{ fontSize: '11px', color: '#f87171', fontWeight: 700, flexShrink: 0, marginTop: '1px' }}>✗ Your answer:</span>
+                                                        <span style={{ fontSize: '12px', color: '#f87171', lineHeight: 1.5 }}>{m.userAnswer}</span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', padding: '8px 12px', background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.25)', borderRadius: '8px' }}>
+                                                        <span style={{ fontSize: '11px', color: '#34d399', fontWeight: 700, flexShrink: 0, marginTop: '1px' }}>✓ Correct:</span>
+                                                        <span style={{ fontSize: '12px', color: '#34d399', lineHeight: 1.5 }}>{m.correctAnswer}</span>
+                                                    </div>
+                                                    {m.explanation && (
+                                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', padding: '8px 12px', background: `${accent.from}08`, border: `1px solid ${accent.from}25`, borderRadius: '8px' }}>
+                                                            <span style={{ fontSize: '11px', color: accent.from, flexShrink: 0, marginTop: '1px' }}>💡</span>
+                                                            <span style={{ fontSize: '12px', color: theme.textSecondary, lineHeight: 1.55 }}>{m.explanation}</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </>
+                                ) : (
+                                    <div style={{ textAlign: 'center', padding: '2.5rem 1rem' }}>
+                                        <div style={{ fontSize: '2.8rem', marginBottom: '10px' }}>🏆</div>
+                                        <p style={{ fontFamily: "'Sora',sans-serif", fontWeight: 700, fontSize: '15px', color: '#34d399', marginBottom: '6px' }}>Perfect Score!</p>
+                                        <p style={{ fontSize: '13px', color: theme.textMuted }}>No mistakes on this attempt — excellent work.</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Footer */}
+                            <div style={{ padding: '14px 24px', borderTop: `1px solid ${theme.border}`, display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                                <button onClick={() => setReviewIdx(null)}
+                                    style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '9px', padding: '8px 16px', color: theme.textSecondary, fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
+                                    Close
+                                </button>
+                                <button onClick={() => { setReviewIdx(null); setQuizModal({ topicTitle: q.topic }); }}
+                                    style={{ background: aGrad, border: 'none', borderRadius: '9px', padding: '8px 18px', color: '#fff', fontSize: '13px', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontFamily: "'DM Sans',sans-serif" }}>
+                                    <Brain size={13} /> Retry Quiz
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
         </div>
     );
 };

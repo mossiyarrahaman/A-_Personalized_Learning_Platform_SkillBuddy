@@ -401,7 +401,7 @@ const PhaseConnector = ({ nextDiffKey }) => {
 };
 
 // ─── Main RoadmapTree ─────────────────────────────────────────────────────────
-const RoadmapTree = ({ modules = [], onTopicClick, onTopicToggle, onQuizComplete }) => {
+const RoadmapTree = ({ modules = [], courseName = '', showHeader = true, onTopicClick, onTopicToggle, onQuizComplete }) => {
     const { theme, accent } = useAppTheme();
     const aGrad = `linear-gradient(135deg,${accent.from},${accent.to})`;
 
@@ -414,14 +414,15 @@ const RoadmapTree = ({ modules = [], onTopicClick, onTopicToggle, onQuizComplete
         <div style={{ width: '100%', background: theme.bg, color: theme.textPrimary, fontFamily: "'DM Sans',sans-serif", transition: 'background .3s' }}>
             <style>{`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=DM+Sans:wght@400;500;600&display=swap');`}</style>
 
-            {/* Header */}
+            {/* Header — hidden when parent already provides a title */}
+            {showHeader && (
             <div style={{ background: theme.surface, borderBottom: `1px solid ${theme.border}`, padding: '2.5rem 1rem 2rem', textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
                 <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: `linear-gradient(to right, ${accent.from}, ${accent.to}, #22c55e)` }} />
                 <div style={{ position: 'absolute', top: '-40px', left: '50%', transform: 'translateX(-50%)', width: '400px', height: '200px', background: `${accent.from}10`, borderRadius: '50%', filter: 'blur(50px)', pointerEvents: 'none' }} />
 
                 <h1 style={{ fontFamily: "'Sora',sans-serif", fontSize: 'clamp(1.6rem,4vw,2.5rem)', fontWeight: 800, color: theme.textPrimary, marginBottom: '8px', position: 'relative' }}>
-                    Your Learning{' '}
-                    <span style={{ background: aGrad, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text', color: 'transparent' }}>Roadmap</span>
+                    Learning Roadmap for{' '}
+                    <span style={{ background: aGrad, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text', color: 'transparent' }}>{courseName || 'Your Course'}</span>
                 </h1>
                 <p style={{ fontSize: '13px', color: theme.textSecondary, maxWidth: '480px', margin: '0 auto 1.5rem', lineHeight: 1.6 }}>
                     Progress through each phase to master your field. Click any topic to start learning.
@@ -449,6 +450,7 @@ const RoadmapTree = ({ modules = [], onTopicClick, onTopicToggle, onQuizComplete
                     </div>
                 </div>
             </div>
+            )}
 
             {/* Roadmap canvas */}
             <div style={{ maxWidth: '860px', margin: '0 auto', padding: '3rem 1.5rem 4rem' }}>

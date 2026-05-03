@@ -14,6 +14,15 @@ const userSchema = new mongoose.Schema({
     otpExpiry: { type: Date },
     otpAttempts: { type: Number, default: 0 },
 
+    // Profile
+    bio: String,
+    location: String,
+    institution: String,
+    website: String,
+    skills: [{ name: String, level: Number }],
+    tags: [String],
+    avatarGradIdx: { type: Number, default: 0 },
+
     // Metadata
     avatar: String,
     createdAt: { type: Date, default: Date.now },

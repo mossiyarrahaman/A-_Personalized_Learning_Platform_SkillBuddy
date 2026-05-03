@@ -141,7 +141,7 @@ async function classOverview(courseId) {
 
     // ── Daily engagement trend (last 14 days) ────────────────────────────────
     const engagementTrend = [];
-    for (let i = 13; i >= 0; i--) {
+    for (let i = 6; i >= 0; i--) {
         const d = new Date(now);
         d.setDate(d.getDate() - i);
         const dateStr = d.toISOString().slice(0, 10);
@@ -746,6 +746,117 @@ async function engagementAnalysis(courseId) {
     };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// 8. TOPIC PROGRESS MATRIX — student × topic completion grid
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function topicProgressMatrix(courseId) {
+    const course = await Course.findById(courseId).lean();
+    if (!course) throw new Error('Course not found');
+
+    const progressRecords = await Progress.find({ course: courseId })
+        .populate('student', 'name email')
+        .lean();
+
+    // Build ordered topic list
+    const topics = [];
+    for (const mod of course.modules || []) {
+        for (const t of mod.topics || []) {
+            const topicId = t.id || t._id?.toString();
+            topics.push({ topicId, title: t.title, moduleTitle: mod.title });
+        }
+    }
+
+    const students = progressRecords
+        .filter(p => p.student)
+        .map(p => ({ studentId: p.student._id.toString(), name: p.student.name, email: p.student.email }));
+
+    // matrix[topicId][studentId] = { status, score, attempts }
+    const matrix = {};
+    for (const { topicId } of topics) {
+        matrix[topicId] = {};
+        for (const p of progressRecords) {
+            if (!p.student) continue;
+            const sid = p.student._id.toString();
+            const completed = (p.completedTopics || []).includes(topicId);
+            const quizzes = (p.topicQuizScores || []).filter(q => q.topicId === topicId);
+            const bestScore = quizzes.length ? Math.max(...quizzes.map(q => q.score)) : null;
+            const inProgress = !completed && (p.resourceProgress || []).some(r => r.topicId === topicId && r.timeSpent > 0);
+            matrix[topicId][sid] = {
+                status: completed ? 'completed' : inProgress ? 'in_progress' : 'not_started',
+                score: bestScore !== null ? Math.round(bestScore) : null,
+                attempts: quizzes.length,
+            };
+        }
+    }
+
+    return { topics, students, matrix };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 9. TEACHER QUIZ RESULTS — per-topic pass/fail per student
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function teacherQuizResults(courseId) {
+    const course = await Course.findById(courseId).lean();
+    if (!course) throw new Error('Course not found');
+
+    const progressRecords = await Progress.find({ course: courseId })
+        .populate('student', 'name email')
+        .lean();
+
+    const topicMap = buildTopicMap(course);
+
+    const topicResults = {};
+    for (const tid in topicMap) {
+        topicResults[tid] = {
+            topicId: tid,
+            title: topicMap[tid].title,
+            moduleTitle: topicMap[tid].moduleTitle,
+            students: [],
+        };
+    }
+
+    for (const p of progressRecords) {
+        if (!p.student) continue;
+        const teacherAttempts = (p.topicQuizScores || []).filter(q => q.isTeacherAssessment);
+        for (const q of teacherAttempts) {
+            if (!topicResults[q.topicId]) continue;
+            const sid = p.student._id.toString();
+            const existing = topicResults[q.topicId].students.find(s => s.studentId.toString() === sid);
+            if (existing) {
+                if (q.score > existing.bestScore) {
+                    existing.bestScore = q.score;
+                    existing.passed = q.score >= 80;
+                }
+                existing.attempts++;
+            } else {
+                topicResults[q.topicId].students.push({
+                    studentId: p.student._id,
+                    name: p.student.name,
+                    bestScore: q.score,
+                    passed: q.score >= 80,
+                    attempts: 1,
+                });
+            }
+        }
+    }
+
+    const topics = Object.values(topicResults)
+        .filter(t => t.students.length > 0)
+        .map(t => ({
+            ...t,
+            passCount: t.students.filter(s => s.passed).length,
+            failCount: t.students.filter(s => !s.passed).length,
+            avgScore: t.students.length > 0
+                ? Math.round(t.students.reduce((a, s) => a + s.bestScore, 0) / t.students.length)
+                : null,
+            attemptedCount: t.students.length,
+        }));
+
+    return { courseTitle: course.title, totalStudents: progressRecords.length, topics };
+}
+
 module.exports = {
     classOverview,
     topicAnalysis,
@@ -754,4 +865,6 @@ module.exports = {
     courseLeaderboard,
     atRiskStudents,
     engagementAnalysis,
+    topicProgressMatrix,
+    teacherQuizResults,
 };

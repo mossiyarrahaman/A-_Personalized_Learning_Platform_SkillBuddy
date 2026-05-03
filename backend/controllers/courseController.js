@@ -5,6 +5,26 @@ const User = require('../models/User'); // Added User model
 const aiService = require('../services/ai-service');
 const { retrieveRelevantChunks } = require('../services/retrievalService');
 
+// Increment streak if a new calendar day has started since last activity
+async function refreshStreak(userId) {
+    const prof = await StudentProfile.findOne({ userId }, 'streak lastActiveDate');
+    if (!prof) return;
+    const now = new Date();
+    const last = prof.lastActiveDate ? new Date(prof.lastActiveDate) : null;
+    if (last && last.toDateString() === now.toDateString()) return; // already counted today
+    const diffDays = last ? Math.round((now - last) / 86400000) : 99;
+    const newStreak = diffDays === 1 ? (prof.streak || 0) + 1 : 1;
+    await StudentProfile.updateOne({ userId }, { $set: { streak: newStreak, lastActiveDate: now } });
+}
+
+function resolvePathContainer(profile, pathId) {
+    if (pathId) {
+        const pathDoc = profile.paths.id(pathId);
+        return pathDoc || null;
+    }
+    return profile.currentPath;
+}
+
 // ============================================================================
 // REPLACE ONLY the generatePath function in courseController.js
 // Find the existing exports.generatePath and replace it with this:
@@ -102,8 +122,21 @@ exports.toggleTopicComplete = async (req, res) => {
             }
         }
 
+        // Stats: 30 min credit per topic completed; detect full-path completion
+        if (status === 'completed') {
+            if (!profile.stats) profile.stats = {};
+            profile.stats.hoursStudied = Math.round(((profile.stats.hoursStudied || 0) + 0.5) * 10) / 10;
+            const allDone = profile.currentPath.modules.every(m => m.status === 'completed');
+            if (allDone && !profile.currentPath.completedAt) {
+                profile.currentPath.completedAt = new Date();
+                profile.stats.coursesCompleted = (profile.stats.coursesCompleted || 0) + 1;
+            }
+            profile.markModified('stats');
+        }
+
         profile.markModified('currentPath');
         await profile.save();
+        await refreshStreak(userId);
         res.json({ success: true, topic: topicDoc });
 
     } catch (error) {
@@ -114,13 +147,16 @@ exports.toggleTopicComplete = async (req, res) => {
 
 exports.toggleStepComplete = async (req, res) => {
     try {
-        const { moduleId, topicId, stepNumber, completed } = req.body;
+        const { moduleId, topicId, stepNumber, completed, pathId } = req.body;
         const userId = req.user.id;
 
         const profile = await StudentProfile.findOne({ userId });
         if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
-        const moduleDoc = profile.currentPath.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
+        const container = resolvePathContainer(profile, pathId);
+        if (!container) return res.status(404).json({ error: 'Path not found' });
+
+        const moduleDoc = container.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
         if (!moduleDoc) return res.status(404).json({ error: 'Module not found' });
 
         const topicDoc = moduleDoc.topics.find(t => t.id === topicId || t._id.toString() === topicId);
@@ -130,7 +166,7 @@ exports.toggleStepComplete = async (req, res) => {
         if (!step) return res.status(404).json({ error: 'Step not found' });
 
         step.completed = completed;
-        profile.markModified('currentPath');
+        profile.markModified(pathId ? 'paths' : 'currentPath');
         await profile.save();
         res.json({ success: true });
     } catch (error) {
@@ -232,7 +268,11 @@ exports.getTopicDetails = async (req, res) => {
             const profile = await StudentProfile.findOne({ userId });
             if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
-            const moduleDoc = profile.currentPath.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
+            const pathId = req.query.pathId;
+            const container = resolvePathContainer(profile, pathId);
+            if (!container) return res.status(404).json({ error: 'Path not found' });
+
+            const moduleDoc = container.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
             if (!moduleDoc) return res.status(404).json({ error: 'Module not found' });
 
             topicDoc = moduleDoc.topics.find(t => t.id === topicId || t._id.toString() === topicId);
@@ -243,29 +283,35 @@ exports.getTopicDetails = async (req, res) => {
         // If AI Path and plan not yet generated, build the step-by-step plan now
         if (contextType === 'ai_path' && (!topicDoc.plan || !topicDoc.plan.steps || topicDoc.plan.steps.length === 0)) {
             const profile = await StudentProfile.findOne({ userId });
-            const moduleDoc2 = profile.currentPath.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
-            const topicToUpdate = moduleDoc2?.topics.find(t => t.id === topicId || t._id.toString() === topicId);
+            const pathId2 = req.query.pathId;
+            const container2 = resolvePathContainer(profile, pathId2);
+            if (container2) {
+                const moduleDoc2 = container2.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
+                const topicToUpdate = moduleDoc2?.topics.find(t => t.id === topicId || t._id.toString() === topicId);
 
-            if (topicToUpdate) {
-                console.log(`Generating step plan for topic: ${topicToUpdate.title}`);
-                const planData = await aiService.generateTopicStepPlan(
-                    profile.onboarding.field,
-                    profile.onboarding.level,
-                    topicToUpdate.title,
-                    moduleDoc2.title,
-                    topicToUpdate.subtopics || []
-                );
+                if (topicToUpdate) {
+                    const field = container2.onboarding?.field || profile.onboarding.field;
+                    const level = container2.onboarding?.level || profile.onboarding.level;
+                    console.log(`Generating step plan for topic: ${topicToUpdate.title}`);
+                    const planData = await aiService.generateTopicStepPlan(
+                        field,
+                        level,
+                        topicToUpdate.title,
+                        moduleDoc2.title,
+                        topicToUpdate.subtopics || []
+                    );
 
-                topicToUpdate.plan = {
-                    objectives: planData.objectives,
-                    estimatedTime: planData.estimatedTime,
-                    generatedAt: new Date(),
-                    steps: planData.steps
-                };
+                    topicToUpdate.plan = {
+                        objectives: planData.objectives,
+                        estimatedTime: planData.estimatedTime,
+                        generatedAt: new Date(),
+                        steps: planData.steps
+                    };
 
-                profile.markModified('currentPath');
-                await profile.save();
-                topicDoc = topicToUpdate;
+                    profile.markModified(pathId2 ? 'paths' : 'currentPath');
+                    await profile.save();
+                    topicDoc = topicToUpdate;
+                }
             }
         }
 
@@ -279,7 +325,7 @@ exports.getTopicDetails = async (req, res) => {
 
 exports.updateResourceProgress = async (req, res) => {
     try {
-        const { moduleId, topicId, resourceId, progress, timeSpent, lastPosition } = req.body;
+        const { moduleId, topicId, resourceId, progress, timeSpent, lastPosition, pathId } = req.body;
         const userId = req.user.id;
 
         // 1. Update StudentProfile (Legacy/Fallback for path generation)
@@ -291,7 +337,8 @@ exports.updateResourceProgress = async (req, res) => {
         }
 
         if (profile) {
-            const moduleDoc = profile.currentPath?.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
+            const container = resolvePathContainer(profile, pathId);
+            const moduleDoc = container?.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
             if (moduleDoc) {
                 const topicDoc = moduleDoc.topics.find(t => t.id === topicId || t._id.toString() === topicId);
                 if (topicDoc) {
@@ -322,7 +369,7 @@ exports.updateResourceProgress = async (req, res) => {
                     }
                 }
             }
-            profile.markModified('currentPath');
+            profile.markModified(pathId ? 'paths' : 'currentPath');
             await profile.save();
         }
 
@@ -351,7 +398,21 @@ exports.updateResourceProgress = async (req, res) => {
                         lastPosition: lastPosition || 0
                     });
                 }
+                const prevTotal = progressRecord.totalTimeSpent || 0;
+                progressRecord.recordActivity({
+                    timeSpent: timeSpent || 0,
+                    resourceCompleted: progress === 100,
+                });
+                // +1 pt per complete 5-minute (300s) block newly crossed
+                const studyPts = Math.floor((progressRecord.totalTimeSpent || 0) / 300) - Math.floor(prevTotal / 300);
                 await progressRecord.save();
+                if (studyPts > 0) {
+                    await StudentProfile.findOneAndUpdate(
+                        { userId },
+                        { $inc: { points: studyPts } },
+                        { upsert: false }
+                    );
+                }
             }
         }
 
@@ -673,6 +734,36 @@ exports.enrollStudent = async (req, res) => {
     }
 };
 
+// Unenroll a student from a course (teacher only)
+exports.unenrollStudent = async (req, res) => {
+    try {
+        const { courseId, studentId } = req.params;
+        const teacherId = req.user.id;
+
+        const course = await Course.findById(courseId);
+        if (!course) return res.status(404).json({ error: 'Course not found' });
+
+        if (course.author.toString() !== teacherId) {
+            return res.status(403).json({ error: 'Not authorized' });
+        }
+
+        const before = course.enrolledStudents.length;
+        course.enrolledStudents = course.enrolledStudents.filter(id => id.toString() !== studentId);
+
+        if (course.enrolledStudents.length === before) {
+            return res.status(404).json({ error: 'Student not enrolled in this course' });
+        }
+
+        await course.save();
+        await Progress.deleteOne({ student: studentId, course: courseId });
+
+        res.json({ success: true, message: 'Student removed from course' });
+    } catch (error) {
+        console.error('Unenroll error:', error);
+        res.status(500).json({ error: 'Server error removing student' });
+    }
+};
+
 // Get Enrolled Classes for Student
 exports.getEnrolledClasses = async (req, res) => {
     try {
@@ -700,6 +791,64 @@ exports.getEnrolledClasses = async (req, res) => {
     }
 };
 
+// Browse published courses the student hasn't joined yet
+exports.getAvailableCourses = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const enrolledRecords = await Progress.find({ student: userId }, 'course');
+        const enrolledIds = enrolledRecords.map(p => p.course.toString());
+
+        const courses = await Course.find({ isPublished: true })
+            .populate('author', 'name')
+            .select('title description field level author enrolledStudents modules tags');
+
+        const available = courses
+            .filter(c => !enrolledIds.includes(c._id.toString()))
+            .map(c => ({
+                _id: c._id,
+                title: c.title,
+                description: c.description,
+                field: c.field,
+                level: c.level,
+                tags: c.tags,
+                teacherName: c.author?.name || 'Instructor',
+                enrolledCount: c.enrolledStudents?.length || 0,
+                topicCount: c.modules.reduce((a, m) => a + (m.topics || []).length, 0),
+            }));
+
+        res.json({ courses: available });
+    } catch (error) {
+        console.error('getAvailableCourses error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+// Student self-enroll in a published course
+exports.selfEnrollStudent = async (req, res) => {
+    try {
+        const { courseId } = req.params;
+        const userId = req.user.id;
+
+        const course = await Course.findById(courseId);
+        if (!course || !course.isPublished) return res.status(404).json({ error: 'Course not found' });
+
+        const already = await Progress.findOne({ student: userId, course: courseId });
+        if (already) return res.status(400).json({ error: 'Already enrolled' });
+
+        await Progress.create({ student: userId, course: courseId });
+
+        if (!course.enrolledStudents.includes(userId)) {
+            course.enrolledStudents.push(userId);
+            await course.save();
+        }
+
+        res.json({ message: 'Enrolled successfully' });
+    } catch (error) {
+        console.error('selfEnrollStudent error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
 // Update Class Progress (Topic Completion)
 exports.updateClassProgress = async (req, res) => {
     try {
@@ -709,10 +858,17 @@ exports.updateClassProgress = async (req, res) => {
         let progress = await Progress.findOne({ student: userId, course: courseId });
         if (!progress) return res.status(404).json({ error: 'Progress record not found' });
 
+        let courseCompleted = false;
         if (topicId) {
             if (completed) {
                 if (!progress.completedTopics.includes(topicId)) {
                     progress.completedTopics.push(topicId);
+                }
+                const courseForCheck = await Course.findById(courseId).lean();
+                const totalTopics = courseForCheck?.modules?.reduce((sum, m) => sum + (m.topics || []).length, 0) || 0;
+                if (totalTopics > 0 && progress.completedTopics.length >= totalTopics && progress.status !== 'completed') {
+                    progress.status = 'completed';
+                    courseCompleted = true;
                 }
             } else {
                 progress.completedTopics = progress.completedTopics.filter(id => id !== topicId);
@@ -720,9 +876,18 @@ exports.updateClassProgress = async (req, res) => {
         }
 
         progress.lastAccessed = Date.now();
+        progress.recordActivity({ topicCompleted: completed === true });
         await progress.save();
 
-        res.json({ success: true, progress });
+        if (courseCompleted) {
+            await StudentProfile.findOneAndUpdate(
+                { userId },
+                { $inc: { points: 200, 'stats.coursesCompleted': 1 } },
+                { upsert: false }
+            );
+        }
+
+        res.json({ success: true, progress, courseCompleted });
     } catch (error) {
 
         console.error("Update class progress error:", error);
@@ -785,13 +950,16 @@ exports.getTopicAnalytics = async (req, res) => {
 
 exports.refreshTopicPlan = async (req, res) => {
     try {
-        const { moduleId, topicId } = req.body;
+        const { moduleId, topicId, pathId } = req.body;
         const userId = req.user.id;
 
         const profile = await StudentProfile.findOne({ userId });
         if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
-        const moduleDoc = profile.currentPath.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
+        const container = resolvePathContainer(profile, pathId);
+        if (!container) return res.status(404).json({ error: 'Path not found' });
+
+        const moduleDoc = container.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
         if (!moduleDoc) return res.status(404).json({ error: 'Module not found' });
 
         const topicDoc = moduleDoc.topics.find(t => t.id === topicId || t._id.toString() === topicId);
@@ -801,10 +969,13 @@ exports.refreshTopicPlan = async (req, res) => {
         topicDoc.plan = { objectives: [], estimatedTime: '', generatedAt: null, steps: [] };
         await profile.save();
 
+        const field = container.onboarding?.field || profile.onboarding.field;
+        const level = container.onboarding?.level || profile.onboarding.level;
+
         // Immediately regenerate the plan
         const planData = await aiService.generateTopicStepPlan(
-            profile.onboarding.field,
-            profile.onboarding.level,
+            field,
+            level,
             topicDoc.title,
             moduleDoc.title,
             topicDoc.subtopics || []
@@ -817,7 +988,7 @@ exports.refreshTopicPlan = async (req, res) => {
             steps: planData.steps
         };
 
-        profile.markModified('currentPath');
+        profile.markModified(pathId ? 'paths' : 'currentPath');
         await profile.save();
         res.json({ success: true, topic: topicDoc });
 
@@ -833,48 +1004,75 @@ exports.submitAiPathQuiz = async (req, res) => {
         const userId = req.user.id;
         const passed = score >= 70;
 
-        const profile = await StudentProfile.findOne({ userId });
-        if (!profile) return res.status(404).json({ error: 'Profile not found' });
+        // Atomic gamification update — avoids null-stats crash on old profiles
+        const updatedProfile = await StudentProfile.findOneAndUpdate(
+            { userId },
+            {
+                $inc: {
+                    points: passed ? 50 : 10,
+                    'stats.quizzesTaken': 1,
+                    'stats.hoursStudied': 0.25,
+                },
+                $set: { lastActiveDate: new Date() },
+            },
+            { upsert: true, new: true }
+        );
+        if (!updatedProfile) return res.status(404).json({ error: 'Profile not found' });
 
-        // Update stats
-        profile.stats.quizzesTaken = (profile.stats.quizzesTaken || 0) + 1;
-        const prevAvg = profile.stats.avgScore || 0;
-        const totalQ = profile.stats.quizzesTaken;
-        profile.stats.avgScore = Math.round(((prevAvg * (totalQ - 1)) + score) / totalQ);
-
+        // Level + badge dedup
         if (passed) {
-            profile.points = (profile.points || 0) + 50;
-            profile.lastActiveDate = Date.now();
+            const newLevel = Math.floor((updatedProfile.points || 0) / 500) + 1;
+            const badgeSet = { $set: {} };
+            if (newLevel !== (updatedProfile.level || 1)) badgeSet.$set.level = newLevel;
 
-            if (profile.stats.quizzesTaken === 1) {
-                profile.badges.push({ id: 'first_quiz', name: 'First Quiz Ace', icon: '🎯', awardedAt: new Date() });
+            const existingIds = new Set((updatedProfile.badges || []).map(b => b.id));
+            const newBadges = [];
+            if ((updatedProfile.stats?.quizzesTaken || 0) === 1 && !existingIds.has('first_quiz')) {
+                newBadges.push({ id: 'first_quiz', name: 'First Quiz Ace', icon: '🎯', awardedAt: new Date() });
             }
-            if (score === 100) {
-                profile.badges.push({ id: 'perfect_score', name: 'Perfectionist', icon: '🌟', awardedAt: new Date() });
+            if (score === 100 && !existingIds.has('perfect_score')) {
+                newBadges.push({ id: 'perfect_score', name: 'Perfectionist', icon: '🌟', awardedAt: new Date() });
             }
+            if (newBadges.length > 0) badgeSet.$push = { badges: { $each: newBadges } };
+            if (Object.keys(badgeSet.$set).length > 0 || badgeSet.$push) {
+                await StudentProfile.updateOne({ userId }, badgeSet);
+            }
+        }
 
-            // Mark topic completed
-            const moduleDoc = profile.currentPath.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
+        // Reload full profile for embedded currentPath mutation
+        const pathProfile = await StudentProfile.findOne({ userId });
+
+        // Mark topic completed on AI path
+        if (passed && pathProfile) {
+            const moduleDoc = pathProfile.currentPath.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
             if (moduleDoc) {
                 const topicDoc = moduleDoc.topics.find(t => t.id === topicId || t._id.toString() === topicId);
                 if (topicDoc) {
                     topicDoc.status = 'completed';
-                    // Complete module if all topics done
                     if (moduleDoc.topics.every(t => t.status === 'completed')) {
                         moduleDoc.status = 'completed';
-                        // Unlock next module
-                        const mIdx = profile.currentPath.modules.findIndex(m => m.id === moduleId || m._id.toString() === moduleId);
-                        if (mIdx >= 0 && mIdx < profile.currentPath.modules.length - 1) {
-                            profile.currentPath.modules[mIdx + 1].status = 'unlocked';
+                        const mIdx = pathProfile.currentPath.modules.findIndex(m => m.id === moduleId || m._id.toString() === moduleId);
+                        if (mIdx >= 0 && mIdx < pathProfile.currentPath.modules.length - 1) {
+                            pathProfile.currentPath.modules[mIdx + 1].status = 'unlocked';
                         }
                     }
                 }
             }
+            pathProfile.markModified('currentPath');
+            await pathProfile.save();
+
+            // Detect full AI-path completion
+            const allDone = pathProfile.currentPath.modules.every(m => m.status === 'completed');
+            if (allDone && !pathProfile.currentPath.completedAt) {
+                await StudentProfile.updateOne(
+                    { userId },
+                    { $inc: { 'stats.coursesCompleted': 1, points: 200 }, $set: { 'currentPath.completedAt': new Date() } }
+                );
+            }
         }
 
-        profile.markModified('currentPath');
-        await profile.save();
-        res.json({ success: true, passed, points: profile.points, stats: profile.stats });
+        await refreshStreak(userId);
+        res.json({ success: true, passed, points: updatedProfile.points, pointsAwarded: passed ? 50 : 10, stats: updatedProfile.stats });
 
     } catch (error) {
         console.error('Error submitting AI path quiz:', error);
@@ -906,8 +1104,7 @@ exports.generateResourceQuiz = async (req, res) => {
 exports.adminTopicQuiz = async (req, res) => {
     try {
         const { courseId, moduleId, topicId } = req.params;
-        const { bloomLevel } = req.query; // Passed from frontend when generating
-        const userId = req.user.id; // Student ID
+        const { bloomLevel } = req.query;
 
         const course = await Course.findById(courseId);
         if (!course) return res.status(404).json({ error: 'Course not found' });
@@ -918,41 +1115,43 @@ exports.adminTopicQuiz = async (req, res) => {
         const topicDoc = moduleDoc.topics.id(topicId);
         if (!topicDoc) return res.status(404).json({ error: 'Topic not found' });
 
-        console.log(`Generating Topic Quiz: ${topicDoc.title} (${course.title}) [${bloomLevel}]`);
+        // Check for teacher-generated questions first
+        const GeneratedQuestion = require('../models/GeneratedQuestion');
+        const teacherQuestions = await GeneratedQuestion.find({
+            courseId,
+            topicId,
+            origin: 'teacher',
+            approved: true,
+        }).sort({ createdAt: -1 }).limit(10).lean();
 
-        // Retrieve relevant RAG context chunks for this topic
-        let ragContext = '';
-        try {
-            const chunks = await retrieveRelevantChunks({
-                query: `${topicDoc.title} ${moduleDoc.title}`,
-                courseId: courseId,
-                topK: 8
-            });
-            if (chunks.length > 0) {
-                ragContext = chunks.map(c => c.text).join('\n\n');
-                console.log(`RAG: retrieved ${chunks.length} chunks for quiz context`);
-            }
-        } catch (ragErr) {
-            console.warn('RAG retrieval failed, falling back to description:', ragErr.message);
+        if (teacherQuestions.length > 0) {
+            const questions = teacherQuestions.map(q => ({
+                question: q.questionText,
+                options: q.options.map(o => o.text),
+                correctAnswer: q.options.find(o => o.isCorrect)?.text || q.correctAnswer,
+                explanation: q.explanation || '',
+                bloomLevel: q.bloomLevel,
+                difficulty: q.difficulty,
+                isTeacherQuestion: true,
+            }));
+            return res.json({ title: topicDoc.title, questions, isTeacherQuiz: true, bloomLevel: teacherQuestions[0].bloomLevel, difficulty: teacherQuestions[0].difficulty });
         }
 
-        // Build context: prefer RAG chunks, fall back to description
-        const contextText = ragContext || topicDoc.description || '';
+        // Fallback: generate on-the-fly via AI
+        let ragContext = '';
+        try {
+            const chunks = await retrieveRelevantChunks({ query: `${topicDoc.title} ${moduleDoc.title}`, courseId, topK: 8 });
+            if (chunks.length > 0) ragContext = chunks.map(c => c.text).join('\n\n');
+        } catch (_) {}
 
+        const contextText = ragContext || topicDoc.description || '';
         const questions = await aiService.generateTopicQuiz(
-            topicDoc.title,
-            moduleDoc.title,
-            course.title,
-            course.field || course.title,
-            course.level || 'Intermediate',
-            bloomLevel || 'understand',
-            contextText
+            topicDoc.title, moduleDoc.title, course.title,
+            course.field || course.title, course.level || 'Intermediate',
+            bloomLevel || 'understand', contextText
         );
 
-        // Optional: Save to TopicQuiz model if we want to build a bank
-        // const newQuiz = new TopicQuiz({ ... }) 
-
-        res.json({ title: topicDoc.title, questions });
+        res.json({ title: topicDoc.title, questions, isTeacherQuiz: false });
 
     } catch (error) {
         console.error("Error generating topic quiz:", error);
@@ -964,8 +1163,15 @@ exports.adminTopicQuiz = async (req, res) => {
 exports.submitTopicQuiz = async (req, res) => {
     try {
         const { courseId, moduleId, topicId } = req.params;
-        // score is percentage (0-100), details is array of question results
-        const { score, totalQuestions, correctAnswers } = req.body;
+        const {
+            score,
+            totalQuestions,
+            correctAnswers,
+            bloomLevel = 'understand',
+            topicTitle: submittedTopicTitle,
+            wrongQuestions = [],
+            isTeacherAssessment = false,
+        } = req.body;
         const userId = req.user.id;
 
         const passed = score >= 70;
@@ -976,98 +1182,267 @@ exports.submitTopicQuiz = async (req, res) => {
             progress = new Progress({ student: userId, course: courseId });
         }
 
-        // Add to topicQuizScores
-        // Remove previous attempt for this topic if exists to keep array clean (or keep history)
-        // Let's keep history
+        // Fetch topic title from course if not provided
+        let resolvedTopicTitle = submittedTopicTitle || 'Unknown';
+        const course = await Course.findById(courseId).lean();
+        if (course) {
+            for (const mod of course.modules || []) {
+                const t = (mod.topics || []).find(t => (t.id || t._id?.toString()) === topicId);
+                if (t) { resolvedTopicTitle = t.title; break; }
+            }
+        }
+
         progress.topicQuizScores.push({
             topicId,
-            topicTitle: "Unknown", // Ideally fetch from course, but optimizing DB calls
+            topicTitle: resolvedTopicTitle,
             score,
             totalQuestions,
             correctAnswers,
             passed,
-            attempts: 1, // Logic to increment if exists could be added
-            lastAttemptDate: Date.now()
+            bloomLevel,
+            isTeacherAssessment: isTeacherAssessment || false,
+            wrongQuestions: wrongQuestions.map(wq => ({
+                questionText: wq.questionText || wq.question || '',
+                studentAnswer: wq.studentAnswer || wq.userAnswer || '',
+                correctAnswer: wq.correctAnswer || '',
+                bloomLevel: wq.bloomLevel || bloomLevel,
+                difficulty: wq.difficulty || 'medium',
+                topic: resolvedTopicTitle,
+            })),
+            attempts: 1,
+            attemptDate: Date.now(),
         });
+
+        // Update running average
+        const allScores = progress.topicQuizScores.map(q => q.score);
+        progress.avgQuizScore = Math.round(allScores.reduce((a, b) => a + b, 0) / allScores.length);
 
         // Check Topic Completion Rule
         // Topic = COMPLETED only if: All mandatory resources completed AND Quiz Score >= 70%
+        const courseDoc = await Course.findById(courseId);
+        const moduleDoc = courseDoc?.modules?.id(moduleId);
+        const topicDoc = moduleDoc?.topics?.id(topicId);
 
-        // We need to check resources status
-        const course = await Course.findById(courseId);
-        const moduleDoc = course.modules.id(moduleId);
-        const topicDoc = moduleDoc.topics.id(topicId);
+        let courseCompleted = false;
 
-        if (topicDoc) {
-            // Check if resources are done
-            // We need to look at progress.resourceProgress for this topic's resources
+        if (isTeacherAssessment && score >= 80) {
+            // Teacher quiz gate: scoring ≥ 80% marks topic complete without resource requirement
+            if (!progress.completedTopics.includes(topicId)) {
+                progress.completedTopics.push(topicId);
+            }
+        } else if (!isTeacherAssessment && topicDoc) {
             const resourceIds = topicDoc.resources.map(r => r._id.toString());
-
-            // Check if all resourceIds exist in progress.resourceProgress with completed: true
-            // Note: User constraint says "Student completes all mandatory resources". Assuming all are mandatory for now.
-
             const completedResourcesCount = progress.resourceProgress.filter(rp =>
                 resourceIds.includes(rp.resourceId) && rp.completed
             ).length;
-
             const allResourcesDone = completedResourcesCount >= resourceIds.length;
 
             if (passed && allResourcesDone) {
                 if (!progress.completedTopics.includes(topicId)) {
                     progress.completedTopics.push(topicId);
                 }
-                // Check Module Completion
-                // if (moduleDoc.topics.every(...) ) ... (Leaving for future optimization)
+            }
+        }
+
+        // Check course-level completion after either path
+        if (progress.completedTopics.includes(topicId)) {
+            const totalTopics = courseDoc?.modules?.reduce((sum, m) => sum + (m.topics || []).length, 0) || 0;
+            if (totalTopics > 0 && progress.completedTopics.length >= totalTopics && progress.status !== 'completed') {
+                progress.status = 'completed';
+                courseCompleted = true;
             }
         }
 
         await progress.save();
 
         // --- GAMIFICATION UPDATE ---
-        if (passed) {
-            try {
-                let profile = await StudentProfile.findOne({ userId });
-                if (!profile) {
-                    profile = new StudentProfile({ userId, points: 0, stats: { hoursStudied: 0, coursesCompleted: 0, quizzesTaken: 0, avgScore: 0 } });
-                }
+        let pointsAwarded = 0;
+        try {
+            // +10 for attempt, +50 for passing
+            const quizPts = passed ? 50 : 10;
+            const updated = await StudentProfile.findOneAndUpdate(
+                { userId },
+                {
+                    $inc: {
+                        points: quizPts,
+                        'stats.quizzesTaken': 1,
+                        'stats.hoursStudied': 0.25,
+                    },
+                    $set: { lastActiveDate: new Date() },
+                },
+                { upsert: true, new: true }
+            );
+            pointsAwarded = quizPts;
 
-                if (profile) {
-                    profile.points = (profile.points || 0) + 50; // Award 50 points for passing quiz
-                    profile.stats.quizzesTaken += 1;
-
-                    // Update avg score (simple running average)
-                    const currentAvg = profile.stats.avgScore || 0;
-                    const totalQuizzes = profile.stats.quizzesTaken;
-                    profile.stats.avgScore = Math.round(((currentAvg * (totalQuizzes - 1)) + score) / totalQuizzes);
-
-                    // Check for badges (Simple example)
-                    if (profile.stats.quizzesTaken === 1) {
-                        profile.badges.push({
-                            id: 'first_quiz',
-                            name: 'First Quiz Ace',
-                            icon: '🎯'
-                        });
-                    }
-                    if (score === 100) {
-                        profile.badges.push({
-                            id: 'perfect_score',
-                            name: 'Perfectionist',
-                            icon: '🌟'
-                        });
-                    }
-
-                    await profile.save();
-                }
-            } catch (statsError) {
-                console.error("Error updating gamification stats:", statsError);
-                // Don't fail the request if stats fail
+            // Course completion bonus (+200)
+            if (courseCompleted) {
+                await StudentProfile.updateOne(
+                    { userId },
+                    { $inc: { points: 200, 'stats.coursesCompleted': 1 } }
+                );
+                pointsAwarded += 200;
             }
+
+            if (passed) {
+                const newLevel = Math.floor(((updated.points || 0) + (courseCompleted ? 200 : 0)) / 500) + 1;
+                const badgeUpdates = {};
+                if (newLevel !== (updated.level || 1)) badgeUpdates.level = newLevel;
+
+                const existingIds = new Set((updated.badges || []).map(b => b.id));
+                const newBadges = [];
+                if ((updated.stats?.quizzesTaken || 0) === 1 && !existingIds.has('first_quiz')) {
+                    newBadges.push({ id: 'first_quiz', name: 'First Quiz Ace', icon: '🎯', awardedAt: new Date() });
+                }
+                if (score === 100 && !existingIds.has('perfect_score')) {
+                    newBadges.push({ id: 'perfect_score', name: 'Perfectionist', icon: '🌟', awardedAt: new Date() });
+                }
+                if ((updated.stats?.quizzesTaken || 0) >= 10 && !existingIds.has('quiz_master')) {
+                    newBadges.push({ id: 'quiz_master', name: 'Quiz Master', icon: '🏆', awardedAt: new Date() });
+                }
+
+                if (Object.keys(badgeUpdates).length > 0 || newBadges.length > 0) {
+                    const finalUpdate = { $set: badgeUpdates };
+                    if (newBadges.length > 0) finalUpdate.$push = { badges: { $each: newBadges } };
+                    await StudentProfile.updateOne({ userId }, finalUpdate);
+                }
+            }
+        } catch (statsError) {
+            console.error('Error updating gamification stats:', statsError);
         }
 
-        res.json({ success: true, passed, topicCompleted: progress.completedTopics.includes(topicId) });
+        await refreshStreak(userId);
+        res.json({ success: true, passed, topicCompleted: progress.completedTopics.includes(topicId), courseCompleted, pointsAwarded });
 
     } catch (error) {
         console.error("Error submitting quiz:", error);
         res.status(500).json({ error: 'Server error processing quiz result' });
+    }
+};
+
+// ============================================================================
+// MULTIPLE AI PATHS — add / get / toggle for extra paths in profile.paths[]
+// ============================================================================
+
+exports.addCoursePath = async (req, res) => {
+    try {
+        const { field, level, goals, quizResults } = req.body;
+        const userId = req.user.id;
+
+        let pathData;
+        try {
+            pathData = await aiService.generateLearningPath(field, level, goals, quizResults);
+        } catch (e) {
+            console.error('AI Generation failed for extra path', e);
+            return res.status(500).json({ error: 'Failed to generate learning path via AI' });
+        }
+
+        const exists = await StudentProfile.exists({ userId });
+        if (!exists) return res.status(404).json({ error: 'Profile not found' });
+
+        const newPath = {
+            onboarding: { field, level, goals },
+            generatedAt: new Date(),
+            modules: pathData.modules.map((m, mIdx) => ({
+                id: `module_${Date.now()}_${mIdx}`,
+                title: m.title,
+                description: m.description,
+                duration: m.duration,
+                difficultyLevel: m.difficultyLevel || 'beginner',
+                goalStatement: m.goalStatement || '',
+                practiceProjects: Array.isArray(m.practiceProjects) ? m.practiceProjects : [],
+                status: 'locked',
+                topics: (m.topics || []).map((t) => ({
+                    id: Math.random().toString(36).substr(2, 9),
+                    title: t.title,
+                    description: t.description,
+                    status: 'pending',
+                    subtopics: (t.subtopics || []).map((s) => ({
+                        id: Math.random().toString(36).substr(2, 9),
+                        title: s.title,
+                        description: s.description,
+                        status: 'pending'
+                    })),
+                    resources: []
+                }))
+            }))
+        };
+
+        if (newPath.modules.length > 0) newPath.modules[0].status = 'unlocked';
+
+        const updated = await StudentProfile.findOneAndUpdate(
+            { userId },
+            { $push: { paths: newPath } },
+            { new: true }
+        );
+
+        const savedPath = updated.paths[updated.paths.length - 1];
+        res.json({ message: 'Learning path added', path: savedPath });
+
+    } catch (error) {
+        console.error('Error adding course path:', error);
+        res.status(500).json({ error: 'Server error adding path' });
+    }
+};
+
+exports.getExtraPath = async (req, res) => {
+    try {
+        const { pathId } = req.params;
+        const profile = await StudentProfile.findOne({ userId: req.user.id });
+        if (!profile) return res.status(404).json({ error: 'Profile not found' });
+        const pathDoc = profile.paths.id(pathId);
+        if (!pathDoc) return res.status(404).json({ error: 'Path not found' });
+        res.json({ path: pathDoc });
+    } catch (error) {
+        console.error('Error getting extra path:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+exports.toggleExtraPathTopic = async (req, res) => {
+    try {
+        const { pathId, moduleId, topicId, status } = req.body;
+        const userId = req.user.id;
+
+        const profile = await StudentProfile.findOne({ userId });
+        if (!profile) return res.status(404).json({ error: 'Profile not found' });
+
+        const pathDoc = profile.paths.id(pathId);
+        if (!pathDoc) return res.status(404).json({ error: 'Path not found' });
+
+        const moduleDoc = pathDoc.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
+        if (!moduleDoc) return res.status(404).json({ error: 'Module not found' });
+
+        const topicDoc = moduleDoc.topics.find(t => t.id === topicId || t._id.toString() === topicId);
+        if (!topicDoc) return res.status(404).json({ error: 'Topic not found' });
+
+        topicDoc.status = status;
+
+        if (moduleDoc.topics.every(t => t.status === 'completed')) {
+            moduleDoc.status = 'completed';
+            const mIdx = pathDoc.modules.findIndex(m => m.id === moduleId || m._id.toString() === moduleId);
+            if (mIdx >= 0 && mIdx < pathDoc.modules.length - 1) {
+                pathDoc.modules[mIdx + 1].status = 'unlocked';
+            }
+        }
+
+        if (status === 'completed') {
+            if (!profile.stats) profile.stats = {};
+            profile.stats.hoursStudied = Math.round(((profile.stats.hoursStudied || 0) + 0.5) * 10) / 10;
+            const allDone = pathDoc.modules.every(m => m.status === 'completed');
+            if (allDone && !pathDoc.completedAt) {
+                pathDoc.completedAt = new Date();
+                profile.stats.coursesCompleted = (profile.stats.coursesCompleted || 0) + 1;
+            }
+            profile.markModified('stats');
+        }
+
+        profile.markModified('paths');
+        await profile.save();
+        await refreshStreak(userId);
+        res.json({ success: true, topic: topicDoc });
+
+    } catch (error) {
+        console.error('Error toggling extra path topic:', error);
+        res.status(500).json({ error: 'Server error' });
     }
 };

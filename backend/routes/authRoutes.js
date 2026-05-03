@@ -9,6 +9,9 @@ router.post('/verify-otp', authController.verifyOtp);
 router.post('/resend-otp', authController.resendOtp);
 router.get('/me', auth, authController.getMe);
 router.get('/students', auth, authController.getAllStudents);
+router.get('/enrolled-students', auth, authController.getEnrolledStudents);
+router.put('/profile', auth, authController.updateProfile);
+router.get('/teacher-stats', auth, authController.getTeacherStats);
 
 
 

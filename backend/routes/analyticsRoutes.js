@@ -156,4 +156,34 @@ router.get('/:courseId/engagement', auth, verifyCourseTeacher, async (req, res) 
     }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// GET /api/analytics/:courseId/topic-matrix
+// ═══════════════════════════════════════════════════════════════════════════════
+// Student × topic completion matrix for the progress heatmap view.
+
+router.get('/:courseId/topic-matrix', auth, verifyCourseTeacher, async (req, res) => {
+    try {
+        const data = await analytics.topicProgressMatrix(req.params.courseId);
+        res.json({ success: true, ...data });
+    } catch (err) {
+        console.error('Topic matrix error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GET /api/analytics/:courseId/teacher-quiz-results
+// ═══════════════════════════════════════════════════════════════════════════════
+// Per-topic teacher quiz pass/fail rates with individual student results.
+
+router.get('/:courseId/teacher-quiz-results', auth, verifyCourseTeacher, async (req, res) => {
+    try {
+        const data = await analytics.teacherQuizResults(req.params.courseId);
+        res.json({ success: true, ...data });
+    } catch (err) {
+        console.error('Teacher quiz results error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;

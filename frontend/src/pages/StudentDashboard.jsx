@@ -113,16 +113,11 @@ const StudentDashboard = ({ user, profile, onLogout, fetchProfile }) => {
 
                 <div style={{ background: theme.surface2, borderRadius: '1.5rem', border: `1px solid ${theme.border}`, overflow: 'hidden', position: 'relative' }}>
                     <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '180px', background: `radial-gradient(ellipse at top, ${accent.from}12, transparent 70%)`, pointerEvents: 'none', zIndex: 0 }} />
-                    <div style={{ padding: '2rem 2rem 1.25rem', position: 'relative', zIndex: 1 }}>
-                        <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: '1.65rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', color: theme.textPrimary }}>
-                            <BookOpen style={{ color: accent.from, width: '26px', height: '26px' }} />
-                            Your Learning Journey
-                        </h2>
-                    </div>
 
                     {profile?.currentPath ? (
                         <RoadmapTree
                             modules={profile.currentPath.modules}
+                            courseName={profile.onboarding?.field || ''}
                             onTopicClick={(moduleId, topicId) => setSelectedTopic({ moduleId, topicId })}
                             onTopicToggle={handleTopicToggle}
                             onQuizComplete={handleQuizComplete}
