@@ -4,7 +4,7 @@ import { X, Send, MessageCircle } from 'lucide-react';
 import api from '../api/axios';
 import { useAppTheme } from '../hooks/useAppTheme';
 
-const SOCKET_URL = 'http://localhost:5000';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
 
 const ClassChat = ({ courseId, courseTitle, currentUser, onClose }) => {
     const { theme, accent } = useAppTheme();

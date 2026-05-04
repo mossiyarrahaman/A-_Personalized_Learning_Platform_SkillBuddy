@@ -15,6 +15,11 @@ const ManageStudentsModal = ({ course, onClose, onUpdate }) => {
     const [loadingId, setLoadingId] = useState(null);
     const [selectedStudents, setSelectedStudents] = useState(new Set());
     const [bulkLoading, setBulkLoading] = useState(false);
+    const [notification, setNotification] = useState(null);
+    const notify = (type, message) => {
+        setNotification({ type, message });
+        setTimeout(() => setNotification(null), 4000);
+    };
 
     const fetchStudentProgress = async () => {
         try {
@@ -52,12 +57,12 @@ const ManageStudentsModal = ({ course, onClose, onUpdate }) => {
         else setLoading(true);
         try {
             await api.post(`/courses/${course._id}/enroll`, { identifier: emailToAdd });
-            if (!specificEmail) { alert('Student added successfully'); setIdentifier(''); }
+            if (!specificEmail) { notify('success', 'Student added successfully!'); setIdentifier(''); }
             onUpdate();
             fetchStudentProgress();
             fetchAvailableStudents();
         } catch (error) {
-            alert(error.response?.data?.error || 'Failed to add student');
+            notify('error', error.response?.data?.error || 'Failed to add student');
         } finally {
             setLoading(false);
             setLoadingId(null);
@@ -81,13 +86,13 @@ const ManageStudentsModal = ({ course, onClose, onUpdate }) => {
             let msg = `Added ${results.added.length} students.`;
             if (results.failed.length > 0) msg += ` Failed: ${results.failed.length}.`;
             if (results.alreadyEnrolled.length > 0) msg += ` Already in: ${results.alreadyEnrolled.length}.`;
-            alert(msg);
+            notify(results.failed.length > 0 ? 'error' : 'success', msg);
             setSelectedStudents(new Set());
             onUpdate();
             fetchStudentProgress();
             fetchAvailableStudents();
         } catch (error) {
-            alert(error.response?.data?.error || 'Failed to add students');
+            notify('error', error.response?.data?.error || 'Failed to add students');
         } finally {
             setBulkLoading(false);
         }
@@ -155,6 +160,11 @@ const ManageStudentsModal = ({ course, onClose, onUpdate }) => {
                     </div>
 
                     <div style={{ padding: '20px 22px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                        {notification && (
+                            <div style={{ padding: '10px 14px', background: notification.type === 'error' ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)', border: `1px solid ${notification.type === 'error' ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'}`, borderRadius: '8px', fontSize: '13px', color: notification.type === 'error' ? '#ef4444' : '#22c55e', fontWeight: 500 }}>
+                                {notification.message}
+                            </div>
+                        )}
                         {/* Manual Search */}
                         <form onSubmit={handleAddStudent}>
                             <label style={labelStyle}>Add by Email / Username</label>

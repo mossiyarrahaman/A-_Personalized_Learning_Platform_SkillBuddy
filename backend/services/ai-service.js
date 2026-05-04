@@ -14,6 +14,20 @@ if (!OPENROUTER_API_KEY) {
   console.warn('⚠️  OPENROUTER_API_KEY not found in .env file');
 }
 
+// Sanitize user-supplied strings before interpolating into prompts.
+// Strips control characters and prompt-injection patterns, limits length.
+function sanitizePromptInput(value, maxLength = 200) {
+  if (typeof value !== 'string') return '';
+  return value
+    .replace(/[\x00-\x1F\x7F]/g, ' ') // strip control chars
+    .replace(/\[INST\]|\[\/INST\]|<\|im_start\|>|<\|im_end\|>/gi, '') // strip common injection tokens
+    .trim()
+    .slice(0, maxLength);
+}
+
+const VALID_LEVELS = new Set(['beginner', 'intermediate', 'advanced', 'expert']);
+const VALID_BLOOM = new Set(['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create', 'mixed']);
+
 // ============================================================================
 // cleanJSONResponse
 // ============================================================================
@@ -111,7 +125,12 @@ async function callOpenRouter(prompt, maxTokens = 4000, temperature = 0.7) {
 // generateLearningPath  ← KEY FIX: better prompt + 8000 tokens + subtopics
 // ============================================================================
 async function generateLearningPath(field, level, goals, quizResults = null) {
-  const goalsText = Array.isArray(goals) ? goals.join(', ') : goals;
+  const safeField = sanitizePromptInput(field, 100);
+  const safeLevel = VALID_LEVELS.has(level) ? level : 'intermediate';
+  const safeGoals = Array.isArray(goals)
+    ? goals.map(g => sanitizePromptInput(g, 100)).join(', ')
+    : sanitizePromptInput(goals, 300);
+  const goalsText = safeGoals;
 
   let quizContext = '';
   if (quizResults) {
@@ -127,7 +146,7 @@ async function generateLearningPath(field, level, goals, quizResults = null) {
     quizContext = `\nDIAGNOSTIC: Score ${score}/${total} (${percentage.toFixed(0)}%). ${instruction}`;
   }
 
-  const prompt = `Create a learning roadmap for a ${level} student learning ${field}.
+  const prompt = `Create a learning roadmap for a ${safeLevel} student learning ${safeField}.
 Goals: ${goalsText}${quizContext}
 
 Return ONLY valid JSON, no markdown, no extra text.
@@ -168,7 +187,7 @@ Rules:
 - Each phase must have 5 to 8 topics. Each topic must have exactly 4 subtopics.
 - practiceProjects must have 2 to 3 short project ideas per phase.
 - goalStatement is one sentence describing what the student achieves.
-Field: ${field}, Level: ${level}.`;
+Field: ${safeField}, Level: ${safeLevel}.`;
 
   try {
     const response = await callOpenRouter(prompt, 8000);
@@ -345,8 +364,13 @@ const BLOOM_STEMS = {
 };
 
 async function generateTopicQuiz(topic, moduleName, className, subjectField, level, bloomLevel = 'understand', contextText = '', numQuestions = 10) {
-  const bloomDesc = BLOOM_DESCRIPTIONS[bloomLevel] || BLOOM_DESCRIPTIONS.understand;
-  const stems = BLOOM_STEMS[bloomLevel] || BLOOM_STEMS.understand;
+  const safeTopic = sanitizePromptInput(topic, 150);
+  const safeModule = sanitizePromptInput(moduleName, 100);
+  const safeClass = sanitizePromptInput(className, 100);
+  const safeSubject = sanitizePromptInput(subjectField, 100);
+  const safeBloom = VALID_BLOOM.has(bloomLevel) ? bloomLevel : 'understand';
+  const bloomDesc = BLOOM_DESCRIPTIONS[safeBloom] || BLOOM_DESCRIPTIONS.understand;
+  const stems = BLOOM_STEMS[safeBloom] || BLOOM_STEMS.understand;
   const hasContext = contextText && contextText.trim().length > 50;
   const askFor = numQuestions + 3;
 
@@ -356,18 +380,18 @@ async function generateTopicQuiz(topic, moduleName, className, subjectField, lev
 
   const prompt = `You are an expert quiz writer. Generate ${askFor} multiple-choice questions about the EXACT topic below, then I will take the best ${numQuestions}.
 
-SUBJECT: ${subjectField}
-COURSE: ${className}
-MODULE: ${moduleName}
-TOPIC: ${topic}
-BLOOM LEVEL: ${bloomLevel} — ${bloomDesc}${contextSection}
+SUBJECT: ${safeSubject}
+COURSE: ${safeClass}
+MODULE: ${safeModule}
+TOPIC: ${safeTopic}
+BLOOM LEVEL: ${safeBloom} — ${bloomDesc}${contextSection}
 
 RULES (follow every one strictly):
-1. TOPIC LOCK: Every question must be answerable only by knowing about "${topic}" specifically. If a question could be answered without knowing "${topic}", rewrite it.
-2. BLOOM LOCK: Every question must be at the "${bloomLevel}" cognitive level.
+1. TOPIC LOCK: Every question must be answerable only by knowing about "${safeTopic}" specifically. If a question could be answered without knowing "${safeTopic}", rewrite it.
+2. BLOOM LOCK: Every question must be at the "${safeBloom}" cognitive level.
    ALLOWED question starters: ${stems.allowed.join(', ')}.
    FORBIDDEN words/phrases in questions: ${stems.forbidden.join(', ')}.
-3. No question may start with the literal word "${topic}" — rephrase so the subject is clear from context.
+3. No question may start with the literal word "${safeTopic}" — rephrase so the subject is clear from context.
 4. 4 answer options each; exactly one is unambiguously correct.
 5. Return ONLY a valid JSON array of exactly ${numQuestions} objects — no markdown, no text outside the JSON array.
 
@@ -380,7 +404,7 @@ JSON format (return EXACTLY ${numQuestions} elements):
     "correctAnswer": "A) ...",
     "explanation": "2-3 sentences: explain simply for a student, then give a real-life analogy or everyday example to make it click.",
     "hint": "Short hint.",
-    "bloomLevel": "${bloomLevel}",
+    "bloomLevel": "${safeBloom}",
     "difficulty": 5
   }
 ]`;
@@ -512,9 +536,38 @@ Return ONLY valid JSON. No markdown, no extra text.
       "action": "A concrete, hands-on task the student should do right now (build something, modify an example, answer a question).",
       "estimatedTime": "25 min",
       "resources": [
-        { "type": "youtube", "title": "Descriptive video title", "url": "https://www.youtube.com/results?search_query=SEARCH_TERMS" },
-        { "type": "article", "title": "Official docs or quality guide title", "url": "https://developer.mozilla.org" },
-        { "type": "practice", "title": "Practice exercise or playground title", "url": "https://jsfiddle.net" }
+        {
+          "type": "youtube",
+          "title": "Specific video title that actually exists on this channel",
+          "platform": "YouTube · Traversy Media",
+          "url": "https://www.youtube.com/watch?v=REAL_VIDEO_ID",
+          "duration": "12 min",
+          "description": "One sentence: exactly what concept this video teaches and why it helps at this step."
+        },
+        {
+          "type": "article",
+          "title": "Specific documentation page or authoritative article title",
+          "platform": "MDN Web Docs",
+          "url": "https://developer.mozilla.org/en-US/docs/SPECIFIC_PAGE",
+          "duration": "8 min read",
+          "description": "One sentence: what the student will specifically learn from reading this."
+        },
+        {
+          "type": "practice",
+          "title": "Specific interactive exercise or challenge title",
+          "platform": "freeCodeCamp",
+          "url": "https://www.freecodecamp.org/learn/SPECIFIC_SECTION",
+          "duration": "30 min",
+          "description": "One sentence: what the student will build or practice in this exercise."
+        },
+        {
+          "type": "reference",
+          "title": "Quick reference guide or cheatsheet title",
+          "platform": "DevDocs.io",
+          "url": "https://devdocs.io/TECHNOLOGY",
+          "duration": "Reference",
+          "description": "One sentence: what this cheatsheet covers for quick lookup while coding."
+        }
       ]
     }
   ]
@@ -529,7 +582,7 @@ Rules:
 - exampleExplanation: 2-3 sentences explaining the example.
 - keyPoints: exactly 3 short bullet facts.
 - commonMistake: one actionable sentence.
-- resources: exactly 3 (youtube, article/docs, practice/playground).
+- resources: exactly 4 — (1) youtube: real video from a reputable educational channel like Traversy Media, Fireship, The Net Ninja, Kevin Powell, Academind, CS50, or freeCodeCamp — use a real watch?v= URL not a search URL; (2) article: direct link to official docs or a trusted guide like MDN, CSS-Tricks, web.dev, Real Python, or official language/framework docs — use a specific page URL not a homepage; (3) practice: interactive exercise from freeCodeCamp, Exercism, JavaScript30, CodePen, or Scrimba — use a specific section URL not a homepage; (4) reference: cheatsheet or quick-reference from DevDocs, QuickRef.ME, or CSS-Tricks — for fast syntax lookup while coding. Each resource must include platform, duration, and description fields. Choose resources appropriate for a ${level} learner.
 - objectives: exactly 3 outcomes starting with "Student will".
 Field: ${field}, Level: ${level}, Topic: ${topicTitle}`;
 
@@ -552,10 +605,13 @@ Field: ${field}, Level: ${level}, Topic: ${topicTitle}`;
       action: s.action || '',
       estimatedTime: s.estimatedTime || '25 min',
       completed: false,
-      resources: Array.isArray(s.resources) ? s.resources.slice(0, 3).map(r => ({
+      resources: Array.isArray(s.resources) ? s.resources.slice(0, 4).map(r => ({
         type: (r.type || 'article').toLowerCase(),
         title: r.title || 'Resource',
-        url: r.url || '#'
+        url: r.url || '#',
+        platform: r.platform || '',
+        duration: r.duration || '',
+        description: r.description || ''
       })) : []
     }));
 
@@ -596,9 +652,38 @@ Field: ${field}, Level: ${level}, Topic: ${topicTitle}`;
         estimatedTime: '25 min',
         completed: false,
         resources: [
-          { type: 'youtube', title: `${sub.title} – ${topicTitle} Tutorial`, url: 'https://www.youtube.com/results?search_query=' + encodeURIComponent(`${sub.title} ${topicTitle} ${level} tutorial`) },
-          { type: 'article', title: `${sub.title} — MDN Docs`, url: 'https://developer.mozilla.org/en-US/search?q=' + encodeURIComponent(`${sub.title} ${topicTitle}`) },
-          { type: 'practice', title: `Practice: ${sub.title}`, url: 'https://www.google.com/search?q=' + encodeURIComponent(`${sub.title} ${topicTitle} exercises`) }
+          {
+            type: 'youtube',
+            title: `${sub.title} – Full Tutorial`,
+            platform: 'YouTube · freeCodeCamp',
+            duration: '~20 min',
+            url: 'https://www.youtube.com/@freecodecamp/search?query=' + encodeURIComponent(`${sub.title} ${topicTitle}`),
+            description: `Watch a structured tutorial on ${sub.title} from freeCodeCamp's educational channel.`
+          },
+          {
+            type: 'article',
+            title: `${sub.title} — MDN Web Docs`,
+            platform: 'MDN Web Docs',
+            duration: '~10 min read',
+            url: 'https://developer.mozilla.org/en-US/search?q=' + encodeURIComponent(`${sub.title} ${topicTitle}`),
+            description: `Read the official, authoritative documentation for ${sub.title}.`
+          },
+          {
+            type: 'practice',
+            title: `Practice ${sub.title} — freeCodeCamp`,
+            platform: 'freeCodeCamp',
+            duration: '~30 min',
+            url: 'https://www.freecodecamp.org/learn',
+            description: `Complete interactive exercises on ${sub.title} with immediate feedback and certification.`
+          },
+          {
+            type: 'reference',
+            title: `${topicTitle} Quick Reference — DevDocs`,
+            platform: 'DevDocs.io',
+            duration: 'Reference',
+            url: 'https://devdocs.io',
+            description: `Use DevDocs as a fast offline-capable API reference for ${topicTitle} syntax and methods.`
+          }
         ]
       }))
     };

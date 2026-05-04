@@ -370,6 +370,17 @@ Generate exactly ${count} questions.`;
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const VALID_BLOOM_LEVELS = new Set(['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create']);
+const VALID_DIFFICULTY = new Set(['easy', 'medium', 'hard', 'mixed']);
+
+// Strip control chars and injection tokens from user-supplied prompt inputs
+function sanitizePromptInput(value, maxLength = 200) {
+    if (typeof value !== 'string') return '';
+    return value
+        .replace(/[\x00-\x1F\x7F]/g, ' ')
+        .replace(/\[INST\]|\[\/INST\]|<\|im_start\|>|<\|im_end\|>/gi, '')
+        .trim()
+        .slice(0, maxLength);
+}
 
 function validateQuestion(q, questionType, fallbackBloomLevel) {
     if (!q.questionText || typeof q.questionText !== 'string' || q.questionText.length < 10) {
@@ -384,7 +395,7 @@ function validateQuestion(q, questionType, fallbackBloomLevel) {
     };
 
     if (questionType === 'mcq') {
-        if (!Array.isArray(q.options) || q.options.length < 2) return null;
+        if (!Array.isArray(q.options) || q.options.length !== 4) return null;
 
         const correctCount = q.options.filter(o => o.isCorrect === true).length;
         if (correctCount !== 1) {
@@ -453,7 +464,10 @@ async function generateQuestions({
     difficulty = 'mixed',
     bloomLevel = 'understand',
 }) {
-    const context = await getContextForCourse(courseId, topic);
+    const safeTopic = sanitizePromptInput(topic, 200);
+    const safeBloom = VALID_BLOOM_LEVELS.has(bloomLevel) ? bloomLevel : 'understand';
+    const safeDiff = VALID_DIFFICULTY.has(difficulty) ? difficulty : 'mixed';
+    const context = await getContextForCourse(courseId, safeTopic);
 
     const allSaved = [];
     const errors = [];
@@ -468,7 +482,7 @@ async function generateQuestions({
         console.log(`\n🧠 Generating ${countPerType} ${qType} questions [Bloom's: ${bloomLevel}]...`);
 
         try {
-            const userPrompt = promptBuilder(context, topic, countPerType, difficulty, bloomLevel);
+            const userPrompt = promptBuilder(context, safeTopic, countPerType, safeDiff, safeBloom);
             const raw = await callLLM(SYSTEM_PROMPT, userPrompt);
             const parsed = parseJSONSafely(raw);
 
@@ -534,12 +548,15 @@ async function generatePracticeQuestions({
     difficulty = 'mixed',
 }) {
     const cappedCount = Math.min(Math.max(Number(count) || 5, 1), 10);
-    const context = await getContextForCourse(courseId, topic);
+    const safeTopic = sanitizePromptInput(topic, 200);
+    const safeBloom = VALID_BLOOM_LEVELS.has(bloomLevel) ? bloomLevel : 'understand';
+    const safeDiff = VALID_DIFFICULTY.has(difficulty) ? difficulty : 'mixed';
+    const context = await getContextForCourse(courseId, safeTopic);
     const sessionId = `practice_${studentId}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
-    console.log(`\n🎓 Student practice: ${cappedCount} MCQ [Bloom's: ${bloomLevel}] (session: ${sessionId})`);
+    console.log(`\n🎓 Student practice: ${cappedCount} MCQ [Bloom's: ${safeBloom}] (session: ${sessionId})`);
 
-    const userPrompt = PROMPT_BUILDERS.mcq(context, topic, cappedCount, difficulty, bloomLevel);
+    const userPrompt = PROMPT_BUILDERS.mcq(context, safeTopic, cappedCount, safeDiff, safeBloom);
     const raw = await callLLM(SYSTEM_PROMPT, userPrompt);
     const parsed = parseJSONSafely(raw);
 

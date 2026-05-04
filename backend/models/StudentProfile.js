@@ -122,4 +122,6 @@ const studentProfileSchema = new mongoose.Schema({
     lastActiveDate: { type: Date, default: Date.now }
 });
 
+studentProfileSchema.index({ points: -1, _id: 1 }); // leaderboard sort
+
 module.exports = mongoose.model('StudentProfile', studentProfileSchema);

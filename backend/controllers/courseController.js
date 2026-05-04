@@ -215,20 +215,54 @@ exports.getStudentDashboard = async (req, res) => {
         const profile = await StudentProfile.findOne({ userId });
         if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
-        // Auto-heal: unlock modules whose predecessor is completed but they're still locked
-        if (profile.currentPath?.modules?.length > 1) {
+        const mods = profile.currentPath?.modules;
+        if (mods?.length > 0) {
             let changed = false;
-            const mods = profile.currentPath.modules;
+
+            // Heal 1: unlock modules whose predecessor is completed but still locked
             for (let i = 0; i < mods.length - 1; i++) {
                 if (mods[i].status === 'completed' && mods[i + 1].status === 'locked') {
                     mods[i + 1].status = 'unlocked';
                     changed = true;
                 }
             }
+
+            // Heal 2: mark modules as completed when all their topics are done
+            for (const mod of mods) {
+                if (mod.status !== 'completed' && mod.topics?.length > 0 &&
+                    mod.topics.every(t => t.status === 'completed')) {
+                    mod.status = 'completed';
+                    changed = true;
+                }
+            }
+
+            // Heal 3: detect full path completion and update counter (idempotent via completedAt guard)
+            if (!profile.currentPath.completedAt && mods.every(m => m.status === 'completed')) {
+                profile.currentPath.completedAt = new Date();
+                if (!profile.stats) profile.stats = {};
+                profile.stats.coursesCompleted = (profile.stats.coursesCompleted || 0) + 1;
+                profile.markModified('stats');
+                changed = true;
+            }
+
             if (changed) {
                 profile.markModified('currentPath');
                 await profile.save();
             }
+        }
+
+        // Also count completed teacher courses from Progress records
+        const teacherCoursesCompleted = await Progress.countDocuments({ student: userId, status: 'completed' });
+        const aiPathsCompleted = profile.currentPath?.completedAt ? 1 : 0;
+        const extraPathsCompleted = Array.isArray(profile.paths)
+            ? profile.paths.filter(p => p.completedAt).length : 0;
+        const trueTotal = aiPathsCompleted + extraPathsCompleted + teacherCoursesCompleted;
+
+        // Sync stored counter if it drifted
+        if (profile.stats.coursesCompleted !== trueTotal) {
+            profile.stats.coursesCompleted = trueTotal;
+            profile.markModified('stats');
+            await profile.save();
         }
 
         res.json({ profile });
@@ -327,6 +361,9 @@ exports.updateResourceProgress = async (req, res) => {
     try {
         const { moduleId, topicId, resourceId, progress, timeSpent, lastPosition, pathId } = req.body;
         const userId = req.user.id;
+        if (typeof progress !== 'number' || progress < 0 || progress > 100) {
+            return res.status(400).json({ error: 'progress must be a number between 0 and 100' });
+        }
 
         // 1. Update StudentProfile (Legacy/Fallback for path generation)
         let profile = await StudentProfile.findOne({ userId });
@@ -826,6 +863,7 @@ exports.getAvailableCourses = async (req, res) => {
 // Student self-enroll in a published course
 exports.selfEnrollStudent = async (req, res) => {
     try {
+        if (req.user.role !== 'student') return res.status(403).json({ error: 'Only students can enroll' });
         const { courseId } = req.params;
         const userId = req.user.id;
 
@@ -855,27 +893,37 @@ exports.updateClassProgress = async (req, res) => {
         const { courseId, topicId, completed } = req.body;
         const userId = req.user.id;
 
-        let progress = await Progress.findOne({ student: userId, course: courseId });
-        if (!progress) return res.status(404).json({ error: 'Progress record not found' });
-
+        let progress;
         let courseCompleted = false;
-        if (topicId) {
-            if (completed) {
-                if (!progress.completedTopics.includes(topicId)) {
-                    progress.completedTopics.push(topicId);
-                }
-                const courseForCheck = await Course.findById(courseId).lean();
-                const totalTopics = courseForCheck?.modules?.reduce((sum, m) => sum + (m.topics || []).length, 0) || 0;
-                if (totalTopics > 0 && progress.completedTopics.length >= totalTopics && progress.status !== 'completed') {
-                    progress.status = 'completed';
-                    courseCompleted = true;
-                }
-            } else {
-                progress.completedTopics = progress.completedTopics.filter(id => id !== topicId);
+
+        if (topicId && completed) {
+            // Atomic $addToSet prevents duplicate entries from race conditions
+            progress = await Progress.findOneAndUpdate(
+                { student: userId, course: courseId },
+                { $addToSet: { completedTopics: topicId }, $set: { lastAccessed: Date.now() } },
+                { new: true }
+            );
+            if (!progress) return res.status(404).json({ error: 'Progress record not found' });
+
+            const courseForCheck = await Course.findById(courseId).lean();
+            const totalTopics = courseForCheck?.modules?.reduce((sum, m) => sum + (m.topics || []).length, 0) || 0;
+            if (totalTopics > 0 && progress.completedTopics.length >= totalTopics && progress.status !== 'completed') {
+                progress.status = 'completed';
+                courseCompleted = true;
+                await progress.save();
             }
+        } else if (topicId && !completed) {
+            progress = await Progress.findOneAndUpdate(
+                { student: userId, course: courseId },
+                { $pull: { completedTopics: topicId }, $set: { lastAccessed: Date.now() } },
+                { new: true }
+            );
+            if (!progress) return res.status(404).json({ error: 'Progress record not found' });
+        } else {
+            progress = await Progress.findOne({ student: userId, course: courseId });
+            if (!progress) return res.status(404).json({ error: 'Progress record not found' });
         }
 
-        progress.lastAccessed = Date.now();
         progress.recordActivity({ topicCompleted: completed === true });
         await progress.save();
 
@@ -889,7 +937,6 @@ exports.updateClassProgress = async (req, res) => {
 
         res.json({ success: true, progress, courseCompleted });
     } catch (error) {
-
         console.error("Update class progress error:", error);
         res.status(500).json({ error: 'Server error updating progress' });
     }
@@ -1019,23 +1066,23 @@ exports.submitAiPathQuiz = async (req, res) => {
         );
         if (!updatedProfile) return res.status(404).json({ error: 'Profile not found' });
 
-        // Level + badge dedup
+        // Level + badge dedup (atomic per-badge to prevent race condition duplicates)
         if (passed) {
             const newLevel = Math.floor((updatedProfile.points || 0) / 500) + 1;
-            const badgeSet = { $set: {} };
-            if (newLevel !== (updatedProfile.level || 1)) badgeSet.$set.level = newLevel;
-
-            const existingIds = new Set((updatedProfile.badges || []).map(b => b.id));
-            const newBadges = [];
-            if ((updatedProfile.stats?.quizzesTaken || 0) === 1 && !existingIds.has('first_quiz')) {
-                newBadges.push({ id: 'first_quiz', name: 'First Quiz Ace', icon: '🎯', awardedAt: new Date() });
+            if (newLevel !== (updatedProfile.level || 1)) {
+                await StudentProfile.updateOne({ userId }, { $set: { level: newLevel } });
             }
-            if (score === 100 && !existingIds.has('perfect_score')) {
-                newBadges.push({ id: 'perfect_score', name: 'Perfectionist', icon: '🌟', awardedAt: new Date() });
+            if ((updatedProfile.stats?.quizzesTaken || 0) === 1) {
+                await StudentProfile.updateOne(
+                    { userId, 'badges.id': { $ne: 'first_quiz' } },
+                    { $push: { badges: { id: 'first_quiz', name: 'First Quiz Ace', icon: '🎯', awardedAt: new Date() } } }
+                );
             }
-            if (newBadges.length > 0) badgeSet.$push = { badges: { $each: newBadges } };
-            if (Object.keys(badgeSet.$set).length > 0 || badgeSet.$push) {
-                await StudentProfile.updateOne({ userId }, badgeSet);
+            if (score === 100) {
+                await StudentProfile.updateOne(
+                    { userId, 'badges.id': { $ne: 'perfect_score' } },
+                    { $push: { badges: { id: 'perfect_score', name: 'Perfectionist', icon: '🌟', awardedAt: new Date() } } }
+                );
             }
         }
 

@@ -89,11 +89,10 @@ generatedQuestionSchema.index({ courseId: 1, origin: 1, bloomLevel: 1 });
 generatedQuestionSchema.index({ courseId: 1, origin: 1, approved: 1 });
 generatedQuestionSchema.index({ sessionId: 1, origin: 1 });
 
-// Optional: TTL index to auto-delete student practice questions after 30 days
-// Uncomment if you want automatic cleanup:
-// generatedQuestionSchema.index(
-//     { createdAt: 1 },
-//     { expireAfterSeconds: 30 * 24 * 3600, partialFilterExpression: { origin: 'student' } }
-// );
+// Auto-delete student practice questions after 30 days
+generatedQuestionSchema.index(
+    { createdAt: 1 },
+    { expireAfterSeconds: 30 * 24 * 3600, partialFilterExpression: { origin: 'student' } }
+);
 
 module.exports = mongoose.model('GeneratedQuestion', generatedQuestionSchema);

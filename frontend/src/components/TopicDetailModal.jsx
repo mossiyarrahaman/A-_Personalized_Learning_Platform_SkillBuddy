@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Book, CheckCircle, Play, FileText, ExternalLink, Loader, ArrowRight, Link, Headphones, Video, Eye, Download, Brain, RefreshCw, AlertCircle, ChevronRight, XCircle, Target, Clock, Zap, ChevronDown, ChevronUp, Lightbulb, Code, List, AlertTriangle } from 'lucide-react';
+import { X, Book, BookOpen, CheckCircle, Play, FileText, ExternalLink, Loader, ArrowRight, Link, Headphones, Video, Eye, Download, Brain, RefreshCw, AlertCircle, ChevronRight, XCircle, Target, Clock, Zap, ChevronDown, ChevronUp, Lightbulb, Code, List, AlertTriangle } from 'lucide-react';
 import api from '../api/axios';
 import { useAppTheme } from '../hooks/useAppTheme';
 
@@ -17,15 +17,17 @@ const resourceIcon = (type) => {
     if (type === 'audio') return <Headphones size={14} />;
     if (type === 'link') return <Link size={14} />;
     if (type === 'practice') return <Code size={14} />;
+    if (['reference', 'cheatsheet', 'docs'].includes(type)) return <BookOpen size={14} />;
     return <FileText size={14} />;
 };
 
-const resourceColorClass = (type) => {
-    if (['youtube', 'video'].includes(type)) return 'text-red-400 bg-red-500/10';
-    if (type === 'audio') return 'text-pink-400 bg-pink-500/10';
-    if (type === 'link') return 'text-cyan-400 bg-cyan-500/10';
-    if (type === 'practice') return 'text-emerald-400 bg-emerald-500/10';
-    return 'text-blue-400 bg-blue-500/10';
+const resourceColorStyle = (type) => {
+    if (['youtube', 'video'].includes(type)) return { color: '#f87171', background: 'rgba(239,68,68,0.1)' };
+    if (type === 'audio') return { color: '#f472b6', background: 'rgba(236,72,153,0.1)' };
+    if (type === 'link') return { color: '#22d3ee', background: 'rgba(6,182,212,0.1)' };
+    if (type === 'practice') return { color: '#34d399', background: 'rgba(16,185,129,0.1)' };
+    if (['reference', 'cheatsheet', 'docs'].includes(type)) return { color: '#a78bfa', background: 'rgba(139,92,246,0.1)' };
+    return { color: '#60a5fa', background: 'rgba(59,130,246,0.1)' };
 };
 
 // ── Step-by-Step Plan Section ──────────────────────────────────────────────
@@ -216,19 +218,32 @@ const StepPlanSection = ({ plan, moduleId, topicId, pathId, onStepToggle }) => {
                                                     href={res.url}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
-                                                    className="flex items-center gap-3 p-3 rounded-lg transition-all group"
+                                                    className="flex items-start gap-3 p-3 rounded-lg transition-all"
                                                     style={{ background: theme.bg, border: `1px solid ${theme.border}` }}
                                                     onMouseEnter={e => { e.currentTarget.style.borderColor = theme.borderHover; e.currentTarget.style.background = theme.surface; }}
                                                     onMouseLeave={e => { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.background = theme.bg; }}
                                                 >
-                                                    <span className={`p-1.5 rounded-md flex-shrink-0 ${resourceColorClass(res.type)}`}>
+                                                    <span style={{ padding: '6px', borderRadius: '6px', flexShrink: 0, display: 'flex', marginTop: '2px', ...resourceColorStyle(res.type) }}>
                                                         {resourceIcon(res.type)}
                                                     </span>
                                                     <div className="flex-1 min-w-0">
-                                                        <span className="text-sm truncate block" style={{ color: theme.textSecondary }}>{res.title}</span>
-                                                        <span className="text-xs capitalize mt-0.5" style={{ color: theme.textMuted }}>{res.type === 'practice' ? 'Practice Exercise' : res.type === 'youtube' ? 'Video Tutorial' : 'Article / Docs'}</span>
+                                                        <span className="text-sm font-medium block leading-snug" style={{ color: theme.textSecondary }}>{res.title}</span>
+                                                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                                            <span className="text-xs font-semibold" style={{ color: resourceColorStyle(res.type).color }}>
+                                                                {res.type === 'youtube' ? 'Video Tutorial'
+                                                                 : res.type === 'practice' ? 'Practice Exercise'
+                                                                 : ['reference', 'cheatsheet'].includes(res.type) ? 'Reference'
+                                                                 : res.type === 'docs' ? 'Documentation'
+                                                                 : 'Article / Docs'}
+                                                            </span>
+                                                            {res.platform && <><span style={{ color: theme.border }}>·</span><span className="text-xs" style={{ color: theme.textMuted }}>{res.platform}</span></>}
+                                                            {res.duration && <><span style={{ color: theme.border }}>·</span><span className="text-xs" style={{ color: theme.textMuted }}>{res.duration}</span></>}
+                                                        </div>
+                                                        {res.description && (
+                                                            <p className="text-xs mt-1 leading-relaxed" style={{ color: theme.textMuted }}>{res.description}</p>
+                                                        )}
                                                     </div>
-                                                    <ExternalLink size={12} style={{ color: theme.textMuted, flexShrink: 0 }} />
+                                                    <ExternalLink size={12} style={{ color: theme.textMuted, flexShrink: 0, marginTop: '4px' }} />
                                                 </a>
                                             ))}
                                         </div>

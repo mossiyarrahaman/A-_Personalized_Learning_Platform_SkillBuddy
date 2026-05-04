@@ -13,6 +13,19 @@ export const AuthProvider = ({ children }) => {
         const checkAuth = async () => {
             const token = localStorage.getItem('token');
             if (token) {
+                // Check JWT expiry client-side before hitting the network
+                try {
+                    const payload = JSON.parse(atob(token.split('.')[1]));
+                    if (payload.exp * 1000 < Date.now()) {
+                        localStorage.removeItem('token');
+                        setLoading(false);
+                        return;
+                    }
+                } catch {
+                    localStorage.removeItem('token');
+                    setLoading(false);
+                    return;
+                }
                 try {
                     const res = await api.get('/auth/me');
                     setUser(res.data.user);

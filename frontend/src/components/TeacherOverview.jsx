@@ -97,19 +97,23 @@ export default function TeacherOverview({ courses }) {
     const [overview, setOverview] = useState(null);
     const [atRisk, setAtRisk] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
     const [tick, setTick] = useState(0);
 
     const fetchData = useCallback(() => {
         if (!selectedCourseId) return;
         setLoading(true);
+        setError(null);
         Promise.all([
             api.get(`/analytics/${selectedCourseId}/overview`),
             api.get(`/analytics/${selectedCourseId}/at-risk`),
         ]).then(([ovRes, arRes]) => {
             setOverview(ovRes.data);
             setAtRisk(arRes.data.alerts || []);
-        }).catch(err => console.error('TeacherOverview fetch error:', err))
-          .finally(() => setLoading(false));
+        }).catch(err => {
+            console.error('TeacherOverview fetch error:', err);
+            setError(err.response?.data?.error || 'Failed to load analytics. Please try again.');
+        }).finally(() => setLoading(false));
     }, [selectedCourseId, tick]);
 
     useEffect(() => { fetchData(); }, [fetchData]);
@@ -154,6 +158,23 @@ export default function TeacherOverview({ courses }) {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', padding: '28px' }}>
+
+            {/* ── Error banner ───────────────────────────────────────────── */}
+            {error && (
+                <div style={{
+                    background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+                    borderRadius: '12px', padding: '12px 16px',
+                    display: 'flex', alignItems: 'center', gap: '10px',
+                    color: '#ef4444', fontSize: '13px', fontWeight: 500,
+                }}>
+                    <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+                    {error}
+                    <button
+                        onClick={() => setTick(t => t + 1)}
+                        style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontWeight: 700, fontSize: '12px', fontFamily: 'inherit' }}
+                    >Retry</button>
+                </div>
+            )}
 
             {/* ── Header row ─────────────────────────────────────────────── */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>

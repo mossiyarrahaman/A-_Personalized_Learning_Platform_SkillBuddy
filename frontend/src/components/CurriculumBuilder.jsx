@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Save, GripVertical, CheckSquare, Square, Upload, X, FileText, Calendar, Edit, Zap, Brain } from 'lucide-react';
+import { Plus, Trash2, Save, CheckSquare, Square, Upload, X, FileText, Calendar, Edit, Zap, Brain } from 'lucide-react';
 import api from '../api/axios';
 import { useAppTheme } from '../hooks/useAppTheme';
 import TeacherQuizEditor from './TeacherQuizEditor';
@@ -42,6 +42,11 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
     const [previewFile, setPreviewFile] = useState(null);
     const [newChecklistItem, setNewChecklistItem] = useState('');
     const [saving, setSaving] = useState(false);
+    const [notification, setNotification] = useState(null);
+    const notify = (type, message) => {
+        setNotification({ type, message });
+        setTimeout(() => setNotification(null), 4000);
+    };
 
     // Quiz generation state
     const [topicQuizStatus, setTopicQuizStatus] = useState({});  // { [topicId]: { difficulty, bloomLevel, questionCount } }
@@ -101,6 +106,7 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
     };
 
     const handleDeleteTopic = (mIndex, tIndex) => {
+        if (!confirm('Delete this topic?')) return;
         const newModules = [...modules]; newModules[mIndex].topics.splice(tIndex, 1); setModules(newModules);
     };
 
@@ -127,9 +133,9 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
         try {
             const response = await api.post('/upload', formData, { headers: { 'Content-Type': null } });
             setSyllabus({ ...syllabus, fileUrl: response.data.url, fileName: file.name });
-            alert('Syllabus uploaded successfully!');
+            notify('success', 'Syllabus uploaded successfully!');
         } catch (error) {
-            alert('Syllabus upload failed: ' + (error.response?.data?.error || error.message || 'Upload failed'));
+            notify('error', 'Syllabus upload failed: ' + (error.response?.data?.error || error.message || 'Upload failed'));
         }
     };
 
@@ -148,9 +154,9 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
             else if (response.data.type?.startsWith('audio')) resource.type = 'audio';
             else if (response.data.type?.includes('pdf') || response.data.type?.includes('officedocument')) resource.type = 'article';
             setModules(newModules);
-            alert('File uploaded successfully!');
+            notify('success', 'File uploaded successfully!');
         } catch (error) {
-            alert('Upload failed: ' + (error.response?.data?.error || error.message || 'Upload failed'));
+            notify('error', 'Upload failed: ' + (error.response?.data?.error || error.message || 'Upload failed'));
         }
     };
 
@@ -158,10 +164,10 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
         setSaving(true);
         try {
             await api.put(`/courses/${courseId}/modules`, { modules, syllabus, title: courseTitle, description: courseDescription });
-            alert('Curriculum and course details saved successfully!');
+            notify('success', 'Curriculum and course details saved successfully!');
             if (onSave) onSave();
         } catch (error) {
-            alert(error.response?.data?.error || 'Failed to save.');
+            notify('error', error.response?.data?.error || 'Failed to save.');
         } finally {
             setSaving(false);
         }
@@ -187,7 +193,7 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
             }));
             setQuizPanelOpen(null);
         } catch (err) {
-            alert(err.response?.data?.error || 'Failed to generate quiz. Make sure course materials are uploaded.');
+            notify('error', err.response?.data?.error || 'Failed to generate quiz. Make sure course materials are uploaded.');
         } finally {
             setQuizGenerating(g => ({ ...g, [topic.id]: false }));
         }
@@ -199,7 +205,7 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
             await api.post('/rag/publish-quiz', { courseId, topicId, published: publish });
             setTopicQuizStatus(s => ({ ...s, [topicId]: { ...s[topicId], published: publish } }));
         } catch {
-            alert('Failed to update publish status. Please try again.');
+            notify('error', 'Failed to update publish status. Please try again.');
         } finally {
             setPublishingTopic(null);
         }
@@ -252,6 +258,13 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
                     </div>
                 </div>
             </header>
+
+            {/* Notification banner */}
+            {notification && (
+                <div style={{ padding: '10px 24px', background: notification.type === 'success' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)', borderBottom: `1px solid ${notification.type === 'success' ? 'rgba(34,197,94,0.25)' : 'rgba(239,68,68,0.25)'}`, display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 500, color: notification.type === 'success' ? '#22c55e' : '#ef4444', flexShrink: 0 }}>
+                    {notification.type === 'success' ? '✓' : '✕'} {notification.message}
+                </div>
+            )}
 
             {/* Body */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '28px 24px' }}>
@@ -343,7 +356,6 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
                         <div key={module.id} style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', overflow: 'hidden' }}>
                             {/* Module header */}
                             <div style={{ background: `${theme.bg}80`, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', borderBottom: `1px solid ${theme.border}` }}>
-                                <GripVertical size={16} style={{ color: theme.textMuted, cursor: 'move', flexShrink: 0 }} />
                                 <div style={{ flex: 1, minWidth: '160px' }}>
                                     <input
                                         type="text"

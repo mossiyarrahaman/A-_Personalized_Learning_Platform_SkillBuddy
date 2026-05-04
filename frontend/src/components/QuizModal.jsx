@@ -38,6 +38,7 @@ const QuizModal = ({
     const [timeLeft, setTimeLeft] = useState(0);
     const [result, setResult] = useState(null);
     const [saving, setSaving] = useState(false);
+    const [genError, setGenError] = useState(null);
 
     // Teacher quiz state
     const [teacherQuiz, setTeacherQuiz] = useState(null);       // { questions, bloomLevel, difficulty } or null
@@ -50,6 +51,7 @@ const QuizModal = ({
     const startRef = useRef(null);
     const bloomRef = useRef(bloomLevel);
     bloomRef.current = bloomLevel;
+    const submittingRef = useRef(false); // guard against double-submit
 
     // Check for teacher-generated quiz on open
     useEffect(() => {
@@ -109,6 +111,7 @@ const QuizModal = ({
 
     const startQuiz = async () => {
         setStage('loading');
+        setGenError(null);
         setAnswers({});
         answersRef.current = {};
         setCurrent(0);
@@ -132,7 +135,7 @@ const QuizModal = ({
         } catch (err) {
             console.error('Quiz gen failed', err);
             setStage('config');
-            alert('Failed to generate quiz. Check your connection and try again.');
+            setGenError('Failed to generate quiz. Check your connection and try again.');
         }
     };
 
@@ -156,6 +159,8 @@ const QuizModal = ({
     // Core submit — uses passed params (not state) to avoid stale closures
     const submitQuiz = (finalAnswers, qs, startTime, bloom) => {
         if (!qs || qs.length === 0) return;
+        if (submittingRef.current) return;
+        submittingRef.current = true;
 
         const taken = startTime ? Math.round((Date.now() - startTime) / 1000) : 0;
 
@@ -231,6 +236,7 @@ const QuizModal = ({
     };
 
     const reset = () => {
+        submittingRef.current = false;
         setStage('config');
         setBloomLevel('understand');
         setQuestions([]);
@@ -268,6 +274,12 @@ const QuizModal = ({
                     </div>
 
                     <div style={{ padding: '22px', overflowY: 'auto' }}>
+
+                        {genError && (
+                            <div style={{ marginBottom: '16px', padding: '10px 14px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '10px', fontSize: '13px', color: '#ef4444', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <AlertCircle size={15} style={{ flexShrink: 0 }} /> {genError}
+                            </div>
+                        )}
 
                         {/* Teacher Assessment — PRIMARY */}
                         {checkingTeacher && (
@@ -389,6 +401,11 @@ const QuizModal = ({
                     </div>
 
                     <div style={{ padding: '22px', overflowY: 'auto', flex: 1 }}>
+                        {timeLeft > 0 && timeLeft <= 30 && (
+                            <div style={{ marginBottom: '14px', padding: '9px 14px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: '10px', fontSize: '12.5px', fontWeight: 600, color: '#ef4444', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <Clock size={14} style={{ flexShrink: 0 }} /> {timeLeft}s remaining — quiz will auto-submit!
+                            </div>
+                        )}
                         <div style={{ display: 'inline-block', background: isTeacherAssessment ? 'rgba(34,197,94,0.12)' : `${accent.from}18`, border: `1px solid ${isTeacherAssessment ? 'rgba(34,197,94,0.3)' : `${accent.from}35`}`, borderRadius: '20px', padding: '3px 10px', fontSize: '11px', fontWeight: 600, color: isTeacherAssessment ? '#22c55e' : accent.from, marginBottom: '14px' }}>
                             {isTeacherAssessment ? '✓ Teacher Assessment · ' : ''}{BLOOM_LEVELS.find(b => b.key === bloomLevel)?.label} · {topicTitle}
                         </div>

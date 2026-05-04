@@ -16,7 +16,7 @@ const StudentDashboard = ({ user, profile, onLogout, fetchProfile }) => {
     const handleTopicToggle = async (moduleId, topicId, status) => {
         try {
             await api.post('/courses/path/toggle-topic', { moduleId, topicId, status });
-            fetchProfile();
+            await fetchProfile();
         } catch (err) {
             console.error('Error toggling topic:', err);
         }
@@ -32,7 +32,7 @@ const StudentDashboard = ({ user, profile, onLogout, fetchProfile }) => {
                 totalQuestions: result.total,
                 correctAnswers: result.score,
             });
-            fetchProfile();
+            await fetchProfile();
         } catch (err) {
             console.error('Error submitting quiz result:', err);
         }

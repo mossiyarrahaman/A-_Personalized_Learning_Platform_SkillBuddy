@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { ChevronLeft, Mail, Lock, Key, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -18,9 +18,24 @@ const ForgotPassword = () => {
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
+    const [resendCooldown, setResendCooldown] = useState(0); // seconds remaining
+    const redirectTimerRef = useRef(null);
+
+    // Countdown tick for resend cooldown
+    useEffect(() => {
+        if (resendCooldown <= 0) return;
+        const t = setTimeout(() => setResendCooldown(c => c - 1), 1000);
+        return () => clearTimeout(t);
+    }, [resendCooldown]);
+
+    // Clean up redirect timer on unmount
+    useEffect(() => {
+        return () => { if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current); };
+    }, []);
 
     const handleSendOtp = async (e) => {
         e.preventDefault();
+        if (resendCooldown > 0) return;
         setLoading(true);
         setError('');
         setMessage('');
@@ -28,6 +43,7 @@ const ForgotPassword = () => {
         try {
             await forgotPassword(email);
             setMessage('Reset code sent to your email.');
+            setResendCooldown(60);
             setStep(2);
         } catch (err) {
             setError(err.response?.data?.error || 'Failed to send reset code.');
@@ -51,7 +67,7 @@ const ForgotPassword = () => {
         try {
             await resetPassword(email, otp, newPassword);
             setMessage('Password reset successful! Redirecting...');
-            setTimeout(() => navigate('/login'), 2000);
+            redirectTimerRef.current = setTimeout(() => navigate('/login'), 2000);
         } catch (err) {
             setError(err.response?.data?.error || 'Failed to reset password.');
         } finally {
@@ -118,11 +134,11 @@ const ForgotPassword = () => {
 
                         <button
                             type="submit"
-                            disabled={loading}
+                            disabled={loading || resendCooldown > 0}
                             className="w-full bg-white text-black font-bold py-3.5 rounded-xl hover:bg-gray-200 transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 disabled:opacity-50 disabled:hover:scale-100"
                         >
-                            {loading ? 'Sending...' : 'Send Reset Code'}
-                            {!loading && <ArrowRight size={18} />}
+                            {loading ? 'Sending...' : resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Send Reset Code'}
+                            {!loading && resendCooldown === 0 && <ArrowRight size={18} />}
                         </button>
                     </form>
                 ) : (
@@ -184,7 +200,7 @@ const ForgotPassword = () => {
                             disabled={loading}
                             className="w-full bg-white text-black font-bold py-3.5 rounded-xl hover:bg-gray-200 transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 disabled:opacity-50 disabled:hover:scale-100"
                         >
-                            {loading ? 'Reseting...' : 'Reset Password'}
+                            {loading ? 'Resetting...' : 'Reset Password'}
                             {!loading && <ArrowRight size={18} />}
                         </button>
                     </form>

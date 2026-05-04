@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_key_change_in_production';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 module.exports = (req, res, next) => {
     const token = req.header('Authorization')?.replace('Bearer ', '');
@@ -14,6 +14,8 @@ module.exports = (req, res, next) => {
         req.user = decoded;
         next();
     } catch (error) {
-        res.status(400).json({ error: 'Invalid token.' });
+        console.warn(`[AUTH_FAIL] IP: ${req.ip} | ${error.name}: ${error.message}`);
+        const isExpired = error.name === 'TokenExpiredError';
+        res.status(401).json({ error: isExpired ? 'Token expired.' : 'Invalid token.' });
     }
 };

@@ -10,4 +10,7 @@ const chatMessageSchema = new mongoose.Schema({
     message: { type: String, required: true, maxlength: 2000 },
 }, { timestamps: true });
 
+chatMessageSchema.index({ courseId: 1, createdAt: -1 });
+chatMessageSchema.index({ createdAt: 1 }, { expireAfterSeconds: 7776000 }); // auto-delete after 90 days
+
 module.exports = mongoose.model('ChatMessage', chatMessageSchema);

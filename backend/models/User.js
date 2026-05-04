@@ -13,6 +13,7 @@ const userSchema = new mongoose.Schema({
     otp: { type: String },
     otpExpiry: { type: Date },
     otpAttempts: { type: Number, default: 0 },
+    otpLockUntil: { type: Date },
 
     // Profile
     bio: String,

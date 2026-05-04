@@ -32,9 +32,19 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const rateLimit = require('express-rate-limit');
 const router = express.Router();
 
 const auth = require('../middleware/auth');
+
+const generateLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 15,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => req.user?.id || req.ip,
+    message: { error: 'Too many generation requests. Please wait before generating more.' },
+});
 const Course = require('../models/Course');
 const Progress = require('../models/Progress');
 const GeneratedQuestion = require('../models/GeneratedQuestion');
@@ -156,7 +166,7 @@ router.post('/ingest', auth, upload.single('resource'), async (req, res) => {
 // Teacher generates questions for their question bank.
 // Accepts bloomLevel to shape the cognitive level of questions.
 
-router.post('/generate', auth, async (req, res) => {
+router.post('/generate', auth, generateLimiter, async (req, res) => {
     try {
         const {
             courseId,
@@ -256,8 +266,12 @@ router.get('/stats/:courseId', auth, async (req, res) => {
 
 router.patch('/questions/:id/approve', auth, async (req, res) => {
     try {
-        const q = await GeneratedQuestion.findByIdAndUpdate(req.params.id, { approved: true }, { new: true });
+        const q = await GeneratedQuestion.findById(req.params.id);
         if (!q) return res.status(404).json({ error: 'Question not found' });
+        const course = await Course.findById(q.courseId).select('author').lean();
+        if (!course || course.author.toString() !== req.user.id) return res.status(403).json({ error: 'Not authorized' });
+        q.approved = true;
+        await q.save();
         res.json({ success: true, question: q });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -268,14 +282,16 @@ router.patch('/questions/:id/approve', auth, async (req, res) => {
 
 router.patch('/questions/:id', auth, async (req, res) => {
     try {
-        const allowedFields = ['questionText', 'options', 'correctAnswer', 'explanation', 'difficulty', 'bloomLevel', 'approved'];
-        const updates = {};
-        for (const field of allowedFields) {
-            if (req.body[field] !== undefined) updates[field] = req.body[field];
-        }
-
-        const q = await GeneratedQuestion.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
+        const q = await GeneratedQuestion.findById(req.params.id);
         if (!q) return res.status(404).json({ error: 'Question not found' });
+        const course = await Course.findById(q.courseId).select('author').lean();
+        if (!course || course.author.toString() !== req.user.id) return res.status(403).json({ error: 'Not authorized' });
+
+        const allowedFields = ['questionText', 'options', 'correctAnswer', 'explanation', 'difficulty', 'bloomLevel', 'approved'];
+        for (const field of allowedFields) {
+            if (req.body[field] !== undefined) q[field] = req.body[field];
+        }
+        await q.save();
         res.json({ success: true, question: q });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -286,8 +302,11 @@ router.patch('/questions/:id', auth, async (req, res) => {
 
 router.delete('/questions/:id', auth, async (req, res) => {
     try {
-        const q = await GeneratedQuestion.findByIdAndDelete(req.params.id);
+        const q = await GeneratedQuestion.findById(req.params.id);
         if (!q) return res.status(404).json({ error: 'Question not found' });
+        const course = await Course.findById(q.courseId).select('author').lean();
+        if (!course || course.author.toString() !== req.user.id) return res.status(403).json({ error: 'Not authorized' });
+        await q.deleteOne();
         res.json({ success: true, message: 'Question deleted' });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -645,7 +664,7 @@ router.delete('/file/:fileId', auth, async (req, res) => {
 // Student picks a course, topic, and Bloom's level → gets a practice quiz.
 // Answers are NOT included in the response (they submit separately).
 
-router.post('/practice/generate', auth, async (req, res) => {
+router.post('/practice/generate', auth, generateLimiter, async (req, res) => {
     try {
         const {
             courseId,

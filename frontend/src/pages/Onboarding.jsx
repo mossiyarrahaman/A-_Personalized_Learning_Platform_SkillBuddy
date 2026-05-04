@@ -75,6 +75,7 @@ const Onboarding = () => {
     const [quizLoading, setQuizLoading] = useState(false);
     const [quizError, setQuizError] = useState(null);
     const [quizResultSummary, setQuizResultSummary] = useState(null);
+    const [generateError, setGenerateError] = useState(null);
 
     const totalSteps = 6;
 
@@ -176,8 +177,8 @@ const Onboarding = () => {
             }
         } catch (error) {
             console.error(error);
-            alert('Failed to generate learning path. Please try again.');
-            setStep(5); // Go back if failed
+            setGenerateError('Failed to generate learning path. Please try again.');
+            setStep(5);
         } finally {
             setLoading(false);
         }
@@ -394,13 +395,18 @@ const Onboarding = () => {
                     </div>
                 </div>
 
+                {generateError && (
+                    <div className="mb-4 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm font-medium text-center">
+                        {generateError}
+                    </div>
+                )}
                 <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
-                    onClick={handleFinalGenerate}
+                    onClick={() => { setGenerateError(null); handleFinalGenerate(); }}
                     className="w-full py-4 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl font-bold text-white text-lg shadow-xl shadow-purple-900/30 flex items-center justify-center gap-2 group"
                 >
-                    Generate Custom Roadmap
+                    {generateError ? 'Try Again' : 'Generate Custom Roadmap'}
                     <ChevronRight className="group-hover:translate-x-1 transition-transform" />
                 </motion.button>
             </div>

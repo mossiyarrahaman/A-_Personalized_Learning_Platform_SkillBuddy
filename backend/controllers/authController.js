@@ -3,11 +3,11 @@ const StudentProfile = require('../models/StudentProfile');
 const jwt = require('jsonwebtoken');
 const { generateOTP, sendOTPEmail, sendPasswordResetEmail } = require('../services/email-service');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_key_change_in_production';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // Helper to create token
 const createToken = (id) => {
-    return jwt.sign({ id }, JWT_SECRET, { expiresIn: '30d' });
+    return jwt.sign({ id }, JWT_SECRET, { expiresIn: '7d' });
 };
 
 exports.register = async (req, res) => {
@@ -41,10 +41,7 @@ exports.register = async (req, res) => {
         const emailResult = await sendOTPEmail(email, name, otp);
 
         if (!emailResult.success) {
-            console.warn("Failed to send email:", emailResult.message);
-            // Note: We still registered the user, but they might be stuck if they can't get OTP.
-            // In dev mode, maybe log the OTP?
-            console.log("DEBUG OTP:", otp);
+            console.warn("Failed to send OTP email during registration:", emailResult.message);
         }
 
         // Create empty profile if student
@@ -126,8 +123,18 @@ exports.verifyOtp = async (req, res) => {
             return res.status(200).json({ success: true, message: 'Already verified', token, user: { id: user._id, role: user.role } });
         }
 
+        // Check lockout
+        if (user.otpLockUntil && user.otpLockUntil > Date.now()) {
+            const secondsLeft = Math.ceil((user.otpLockUntil - Date.now()) / 1000);
+            return res.status(429).json({ error: `Too many failed attempts. Try again in ${secondsLeft} seconds.` });
+        }
+
         if (user.otp !== otp) {
-            user.otpAttempts += 1;
+            user.otpAttempts = (user.otpAttempts || 0) + 1;
+            if (user.otpAttempts >= 5) {
+                user.otpLockUntil = new Date(Date.now() + 15 * 60 * 1000); // lock 15 mins
+                user.otpAttempts = 0;
+            }
             await user.save();
             return res.status(400).json({ error: 'Invalid OTP' });
         }
@@ -140,6 +147,7 @@ exports.verifyOtp = async (req, res) => {
         user.otp = undefined;
         user.otpExpiry = undefined;
         user.otpAttempts = 0;
+        user.otpLockUntil = undefined;
         await user.save();
 
         const token = createToken(user._id);
@@ -166,7 +174,7 @@ exports.resendOtp = async (req, res) => {
 
         const emailResult = await sendOTPEmail(email, user.name, otp);
         if (!emailResult.success) {
-            console.log("DEBUG OTP (Resend):", otp);
+            console.warn("Failed to resend OTP email:", emailResult.message);
         }
 
         res.json({ message: 'OTP resent successfully' });
@@ -178,7 +186,7 @@ exports.resendOtp = async (req, res) => {
 
 exports.getMe = async (req, res) => {
     try {
-        const user = await User.findById(req.user.id).select('-password');
+        const user = await User.findById(req.user.id).select('-password -otp -otpExpiry -otpAttempts -otpLockUntil');
         res.json({ user });
     } catch (error) {
         res.status(500).json({ error: 'Server error' });
@@ -187,7 +195,8 @@ exports.getMe = async (req, res) => {
 
 exports.getAllStudents = async (req, res) => {
     try {
-        const students = await User.find({ role: 'student' }).select('-password');
+        if (req.user.role !== 'teacher') return res.status(403).json({ error: 'Forbidden' });
+        const students = await User.find({ role: 'student' }).select('-password -otp -otpExpiry -otpAttempts -otpLockUntil');
         res.json({ students });
     } catch (error) {
         console.error(error);
@@ -248,8 +257,7 @@ exports.forgotPassword = async (req, res) => {
         const emailResult = await sendPasswordResetEmail(email, user.name, otp);
 
         if (!emailResult.success) {
-            console.log("DEBUG Forgot Password OTP:", otp);
-            // In a real app we might error out, but here let's allow it for dev
+            console.warn("Failed to send password reset email:", emailResult.message);
         }
 
         res.json({ message: 'Password reset OTP sent to email' });

@@ -123,8 +123,8 @@ const TeacherAnalytics = ({ courses = [] }) => {
     const views = [
         { id: 'overview', label: 'Overview', icon: Activity },
         { id: 'topics', label: 'Topics', icon: BookOpen },
-        { id: 'teacher-quiz', label: 'Teacher Quizzes', icon: CheckCircle },
-        { id: 'quiz-analysis', label: 'Quiz Forensics', icon: Brain },
+        { id: 'teacher-quiz', label: 'Test/Quiz Score', icon: CheckCircle },
+        { id: 'quiz-analysis', label: 'Quiz Analysis', icon: Brain },
         { id: 'performance', label: 'Performance', icon: BarChart3 },
         { id: 'topic-progress', label: 'Topic Progress', icon: Grid },
         { id: 'leaderboard', label: 'Leaderboard', icon: Trophy },
@@ -623,6 +623,27 @@ const QuizForensicsView = ({ data }) => {
     const [selectedTopicFilter, setSelectedTopicFilter] = useState('all');
     const [topicsData, setTopicsData] = useState(null);
 
+    const storageKey = `dismissed_missed_${courseId}`;
+    const [dismissed, setDismissed] = useState(() => {
+        try { return new Set(JSON.parse(localStorage.getItem(storageKey)) || []); }
+        catch { return new Set(); }
+    });
+
+    const dismissQuestion = (q) => {
+        const key = q.questionId || q.questionText;
+        setDismissed(prev => {
+            const next = new Set(prev);
+            next.add(key);
+            localStorage.setItem(storageKey, JSON.stringify([...next]));
+            return next;
+        });
+    };
+
+    const restoreAll = () => {
+        setDismissed(new Set());
+        localStorage.removeItem(storageKey);
+    };
+
     useEffect(() => {
         if (!courseId) return;
         api.get(`/analytics/${courseId}/topics`)
@@ -640,9 +661,10 @@ const QuizForensicsView = ({ data }) => {
         : BLOOM_ORDER.filter(bl => bloomPerformance?.[bl])
             .map(bl => ({ name: bl, score: bloomPerformance[bl].percentage, total: bloomPerformance[bl].total }));
 
-    const filteredQuestions = selectedTopicFilter === 'all'
+    const filteredQuestions = (selectedTopicFilter === 'all'
         ? (mostMissedQuestions || [])
-        : (mostMissedQuestions || []).filter(q => q.topic === selectedTopicObj?.title);
+        : (mostMissedQuestions || []).filter(q => q.topic === selectedTopicObj?.title)
+    ).filter(q => !dismissed.has(q.questionId || q.questionText));
 
     return (
         <div className="space-y-6">
@@ -685,10 +707,16 @@ const QuizForensicsView = ({ data }) => {
             )}
 
             <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', overflow: 'hidden' }}>
-                <div style={{ padding: '16px 24px', borderBottom: `1px solid ${theme.border}` }}>
+                <div style={{ padding: '16px 24px', borderBottom: `1px solid ${theme.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <h3 style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0 }}>
                         Most Missed Questions {selectedTopicObj ? `— ${selectedTopicObj.title}` : '(All Topics)'}
                     </h3>
+                    {dismissed.size > 0 && (
+                        <button onClick={restoreAll}
+                            style={{ fontSize: '11px', color: accent.from, background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0, textDecoration: 'underline' }}>
+                            Restore {dismissed.size} dismissed
+                        </button>
+                    )}
                 </div>
                 <div>
                     {filteredQuestions.map((q, i) => (
@@ -709,9 +737,17 @@ const QuizForensicsView = ({ data }) => {
                                         </div>
                                     )}
                                 </div>
-                                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                                    <div style={{ fontSize: '24px', fontWeight: 700, color: '#ef4444' }}>{q.missedCount}</div>
-                                    <div style={{ fontSize: '11px', color: theme.textMuted }}>students missed</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px', flexShrink: 0 }}>
+                                    <button onClick={() => dismissQuestion(q)} title="Dismiss from list"
+                                        style={{ background: 'transparent', border: `1px solid ${theme.border}`, borderRadius: '6px', color: theme.textMuted, cursor: 'pointer', fontSize: '12px', padding: '2px 8px', fontFamily: 'inherit', lineHeight: 1.5 }}
+                                        onMouseEnter={e => { e.currentTarget.style.borderColor = '#ef4444'; e.currentTarget.style.color = '#ef4444'; }}
+                                        onMouseLeave={e => { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.color = theme.textMuted; }}>
+                                        × Clear
+                                    </button>
+                                    <div style={{ textAlign: 'right' }}>
+                                        <div style={{ fontSize: '24px', fontWeight: 700, color: '#ef4444' }}>{q.missedCount}</div>
+                                        <div style={{ fontSize: '11px', color: theme.textMuted }}>students missed</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

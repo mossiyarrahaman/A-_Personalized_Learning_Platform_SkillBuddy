@@ -42,6 +42,11 @@ const TeacherQuizEditor = ({ courseId, topicId, topicTitle, onClose, onUpdate })
     const [aiGenerating, setAiGenerating] = useState(false);
     const [aiDifficulty, setAiDifficulty] = useState('medium');
     const [aiBloom, setAiBloom] = useState('understand');
+    const [notification, setNotification] = useState(null);
+    const notify = (type, message) => {
+        setNotification({ type, message });
+        setTimeout(() => setNotification(null), 4000);
+    };
 
     useEffect(() => {
         fetchQuestions();
@@ -72,7 +77,7 @@ const TeacherQuizEditor = ({ courseId, topicId, topicTitle, onClose, onUpdate })
             setPublished(pub);
             if (onUpdate) onUpdate(questions.length, pub);
         } catch {
-            alert('Failed to update publish status. Please try again.');
+            notify('error', 'Failed to update publish status. Please try again.');
         } finally {
             setPublishing(false);
         }
@@ -115,7 +120,7 @@ const TeacherQuizEditor = ({ courseId, topicId, topicTitle, onClose, onUpdate })
             setSaveSuccess(s => ({ ...s, [id]: true }));
             setTimeout(() => setSaveSuccess(s => ({ ...s, [id]: false })), 2000);
         } catch (err) {
-            alert(err.response?.data?.error || 'Failed to save question.');
+            notify('error', err.response?.data?.error || 'Failed to save question.');
         } finally {
             setSaving(s => ({ ...s, [id]: false }));
         }
@@ -130,7 +135,7 @@ const TeacherQuizEditor = ({ courseId, topicId, topicTitle, onClose, onUpdate })
             setQuestions(newQs);
             if (onUpdate) onUpdate(newQs.length);
         } catch (err) {
-            alert(err.response?.data?.error || 'Failed to delete question.');
+            notify('error', err.response?.data?.error || 'Failed to delete question.');
         } finally {
             setDeleting(d => ({ ...d, [id]: false }));
         }
@@ -145,9 +150,9 @@ const TeacherQuizEditor = ({ courseId, topicId, topicTitle, onClose, onUpdate })
     };
 
     const addCustomQuestion = async () => {
-        if (!customForm.questionText.trim()) return alert('Question text is required.');
-        if (customForm.options.some(o => !o.text.trim())) return alert('Fill in all four options.');
-        if (!customForm.options.some(o => o.isCorrect)) return alert('Select the correct answer.');
+        if (!customForm.questionText.trim()) { notify('error', 'Question text is required.'); return; }
+        if (customForm.options.some(o => !o.text.trim())) { notify('error', 'Fill in all four options.'); return; }
+        if (!customForm.options.some(o => o.isCorrect)) { notify('error', 'Select the correct answer.'); return; }
         setAddingSingle(true);
         try {
             const res = await api.post('/rag/questions', {
@@ -164,7 +169,7 @@ const TeacherQuizEditor = ({ courseId, topicId, topicTitle, onClose, onUpdate })
             setAddMode(null);
             setCustomForm(emptyCustomForm());
         } catch (err) {
-            alert(err.response?.data?.error || 'Failed to add question.');
+            notify('error', err.response?.data?.error || 'Failed to add question.');
         } finally {
             setAddingSingle(false);
         }
@@ -182,7 +187,7 @@ const TeacherQuizEditor = ({ courseId, topicId, topicTitle, onClose, onUpdate })
             if (onUpdate) onUpdate(newQs.length);
             setAddMode(null);
         } catch (err) {
-            alert(err.response?.data?.error || 'Failed to generate question.');
+            notify('error', err.response?.data?.error || 'Failed to generate question.');
         } finally {
             setAiGenerating(false);
         }
@@ -225,6 +230,13 @@ const TeacherQuizEditor = ({ courseId, topicId, topicTitle, onClose, onUpdate })
                         </div>
                     </div>
                 </div>
+
+                {/* Notification */}
+                {notification && (
+                    <div style={{ padding: '10px 24px', background: notification.type === 'error' ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)', borderBottom: `1px solid ${notification.type === 'error' ? 'rgba(239,68,68,0.25)' : 'rgba(34,197,94,0.25)'}`, fontSize: '13px', fontWeight: 500, color: notification.type === 'error' ? '#ef4444' : '#22c55e', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {notification.type === 'error' ? '✕' : '✓'} {notification.message}
+                    </div>
+                )}
 
                 {/* Body */}
                 <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '12px' }}>

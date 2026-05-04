@@ -28,6 +28,7 @@ const TeacherDashboard = ({ user, onLogout }) => {
     const [managingStudentsCourse, setManagingStudentsCourse] = useState(null);
     const [removingStudent, setRemovingStudent] = useState(null); // {_id, name, enrolledCourseDetails}
     const [chatCourseId, setChatCourseId] = useState(null); // courseId of open chat panel
+    const [createFormMsg, setCreateFormMsg] = useState(null);
 
     useEffect(() => { fetchOverviewData(); }, []);
     useEffect(() => {
@@ -103,12 +104,12 @@ const TeacherDashboard = ({ user, onLogout }) => {
         try {
             await api.post('/courses/create', data);
             setShowCreateModal(false);
+            setCreateFormMsg(null);
             fetchCourses();
             fetchOverviewData();
-            alert('Class created successfully!');
         } catch (error) {
             const errorMsg = error.response?.data?.error || 'Failed to create course. Please try again.';
-            alert(errorMsg);
+            setCreateFormMsg({ type: 'error', message: errorMsg });
         }
     };
 
@@ -435,9 +436,14 @@ const TeacherDashboard = ({ user, onLogout }) => {
                         <div style={{ background: theme.surface, borderRadius: '20px', width: '100%', maxWidth: '440px', border: `1px solid ${theme.border}`, boxShadow: `0 0 60px ${accent.glow}`, overflow: 'hidden' }}>
                             <div style={{ padding: '20px 24px', borderBottom: `1px solid ${theme.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <h3 style={{ fontSize: '16px', fontWeight: 700, color: theme.textPrimary, margin: 0, fontFamily: "'Sora', sans-serif" }}>Create New Class</h3>
-                                <button onClick={() => setShowCreateModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: theme.textMuted, display: 'flex' }}><X size={18} /></button>
+                                <button onClick={() => { setShowCreateModal(false); setCreateFormMsg(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: theme.textMuted, display: 'flex' }}><X size={18} /></button>
                             </div>
                             <form onSubmit={handleCreateClass} style={{ padding: '22px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                {createFormMsg && (
+                                    <div style={{ padding: '10px 14px', background: createFormMsg.type === 'error' ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)', border: `1px solid ${createFormMsg.type === 'error' ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'}`, borderRadius: '8px', fontSize: '13px', color: createFormMsg.type === 'error' ? '#ef4444' : '#22c55e', fontWeight: 500 }}>
+                                        {createFormMsg.message}
+                                    </div>
+                                )}
                                 {[
                                     { label: 'Class Title', name: 'title', type: 'input', placeholder: 'e.g. Advanced React Patterns', required: true },
                                     { label: 'Description', name: 'description', type: 'textarea', placeholder: 'What will students learn?', required: true },
