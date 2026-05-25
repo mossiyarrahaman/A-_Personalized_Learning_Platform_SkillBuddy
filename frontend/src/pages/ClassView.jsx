@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronDown, ChevronUp, BookOpen, Check, Play, FileText, Brain, GraduationCap, Loader, Target, TrendingUp, MessageCircle } from 'lucide-react';
+import { ChevronLeft, ChevronDown, ChevronUp, BookOpen, Check, Play, FileText, Brain, GraduationCap, Loader, Target, TrendingUp, MessageCircle, ClipboardList, Timer, Clock, CheckCircle, XCircle, Send } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../api/axios';
 import ResourcePlayer from '../components/ResourcePlayer';
 import QuizModal from '../components/QuizModal';
 import ClassChat from '../components/ClassChat';
+import TierQuizPanel from '../components/TierQuizPanel';
 import { useAppTheme } from '../hooks/useAppTheme';
 import { useAuth } from '../context/AuthContext';
 
@@ -24,15 +25,31 @@ const ClassView = () => {
     const [quizModalOpen, setQuizModalOpen] = useState(false);
     const [quizTarget, setQuizTarget] = useState(null);
     const [topicQuizStatus, setTopicQuizStatus] = useState({});
+    const [tierScores, setTierScores] = useState({});
+    const [expandedTierTopic, setExpandedTierTopic] = useState(null);
     const [chatOpen, setChatOpen] = useState(false);
+
+    // Module-level tests + assignments
+    const [moduleTests, setModuleTests] = useState({});
+    const [moduleAssignments, setModuleAssignments] = useState({});
+    const [subDraft, setSubDraft] = useState({});         // { [assignmentId]: { text, files[] } }
+    const [submittingAssignment, setSubmittingAssignment] = useState({});
+    // Module test overlay
+    const [activeModuleTest, setActiveModuleTest] = useState(null);  // { test, attemptId, questions }
+    const [moduleTestAnswers, setModuleTestAnswers] = useState({});
+    const moduleTestAnswersRef = useRef({});
+    const [moduleTestTimeLeft, setModuleTestTimeLeft] = useState(0);
+    const [moduleTestResult, setModuleTestResult] = useState(null);
+    const submittingModuleTestRef = useRef(false);
 
     useEffect(() => { fetchClassDetails(); }, [courseId]);
 
     const fetchClassDetails = async () => {
         try {
-            const [classRes, quizStatusRes] = await Promise.all([
+            const [classRes, quizStatusRes, tierScoresRes] = await Promise.all([
                 api.get('/courses/student/enrolled-classes'),
                 api.get(`/rag/topic-quizzes/${courseId}`).catch(() => ({ data: { quizzes: {} } })),
+                api.get(`/courses/${courseId}/my-tier-scores`).catch(() => ({ data: { byTopic: {} } })),
             ]);
             const foundClass = classRes.data.classes.find(c => c._id === courseId || c.id === courseId);
             if (foundClass) {
@@ -49,11 +66,98 @@ const ClassView = () => {
                 }));
             }
             setTopicQuizStatus(quizzes);
+            setTierScores(tierScoresRes.data.byTopic || {});
         } catch (error) {
             console.error("Failed to load class", error);
         } finally {
             setLoading(false);
         }
+    };
+
+    const refreshTierScores = async () => {
+        try {
+            const res = await api.get(`/courses/${courseId}/my-tier-scores`);
+            setTierScores(res.data.byTopic || {});
+        } catch {}
+    };
+
+    const fetchModuleContent = async (moduleId) => {
+        try {
+            const [tRes, aRes] = await Promise.allSettled([
+                api.get(`/class-tests/module/${courseId}/${moduleId}`),
+                api.get(`/assignments/module/${courseId}/${moduleId}`),
+            ]);
+            setModuleTests(prev => ({ ...prev, [moduleId]: tRes.status === 'fulfilled' ? (tRes.value.data.tests || []) : [] }));
+            setModuleAssignments(prev => ({ ...prev, [moduleId]: aRes.status === 'fulfilled' ? (aRes.value.data.assignments || []) : [] }));
+        } catch {}
+    };
+
+    // Module test timer
+    useEffect(() => {
+        if (!activeModuleTest || moduleTestResult) return;
+        if (moduleTestTimeLeft <= 0) {
+            if (submittingModuleTestRef.current) return;
+            submittingModuleTestRef.current = true;
+            const answers = activeModuleTest.questions.map((q, i) => ({ questionIndex: i, selectedLabel: moduleTestAnswersRef.current[i] || null }));
+            api.post(`/class-tests/${activeModuleTest.test._id}/submit`, { attemptId: activeModuleTest.attemptId, answers })
+                .then(res => setModuleTestResult({ score: res.data.score, passed: res.data.passed, correctCount: res.data.correctCount, totalQuestions: res.data.totalQuestions }))
+                .catch(() => {});
+            return;
+        }
+        const t = setTimeout(() => setModuleTestTimeLeft(s => s - 1), 1000);
+        return () => clearTimeout(t);
+    }, [activeModuleTest, moduleTestTimeLeft, moduleTestResult]);
+
+    const startModuleTest = async (test) => {
+        try {
+            const res = await api.post(`/class-tests/${test._id}/start`, {});
+            const { attemptId, questions, timeLimitMinutes, startedAt } = res.data;
+            const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+            const remaining = Math.max(0, timeLimitMinutes * 60 - elapsed);
+            submittingModuleTestRef.current = false;
+            setModuleTestAnswers({});
+            moduleTestAnswersRef.current = {};
+            setModuleTestResult(null);
+            setModuleTestTimeLeft(remaining);
+            setActiveModuleTest({ test, attemptId, questions });
+        } catch (err) {
+            alert(err.response?.data?.error || 'Could not start test');
+        }
+    };
+
+    const submitModuleTest = async () => {
+        if (submittingModuleTestRef.current) return;
+        submittingModuleTestRef.current = true;
+        const answers = activeModuleTest.questions.map((q, i) => ({ questionIndex: i, selectedLabel: moduleTestAnswersRef.current[i] || null }));
+        try {
+            const res = await api.post(`/class-tests/${activeModuleTest.test._id}/submit`, { attemptId: activeModuleTest.attemptId, answers });
+            setModuleTestResult({ score: res.data.score, passed: res.data.passed, correctCount: res.data.correctCount, totalQuestions: res.data.totalQuestions });
+        } catch (err) {
+            alert(err.response?.data?.error || 'Failed to submit test');
+            submittingModuleTestRef.current = false;
+        }
+    };
+
+    const submitModuleAssignment = async (assignmentId, courseId) => {
+        const draft = subDraft[assignmentId] || {};
+        if (!draft.text?.trim() && !(draft.files?.length)) {
+            alert('Please write a response or attach a file'); return;
+        }
+        setSubmittingAssignment(s => ({ ...s, [assignmentId]: true }));
+        try {
+            await api.post(`/assignments/${assignmentId}/submit`, { textResponse: draft.text || '', files: draft.files || [] });
+            setSubDraft(d => ({ ...d, [assignmentId]: {} }));
+            fetchModuleContent(expandedModule);
+        } catch (err) {
+            alert(err.response?.data?.error || 'Submission failed');
+        } finally {
+            setSubmittingAssignment(s => ({ ...s, [assignmentId]: false }));
+        }
+    };
+
+    const fmtCountdown = (sec) => {
+        const m = Math.floor(sec / 60); const s = sec % 60;
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     };
 
     const toggleTopic = async (topicId) => {
@@ -100,7 +204,7 @@ const ClassView = () => {
     ];
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', overflow: 'hidden', background: theme.bg, color: theme.textPrimary, fontFamily: "'DM Sans', sans-serif" }}>
+        <div style={{ minHeight: '100vh', width: '100%', background: theme.bg, color: theme.textPrimary, fontFamily: "'DM Sans', sans-serif" }}>
 
             {/* Back button — top-left, outside the hero */}
             <div style={{ padding: '20px 24px 0' }}>
@@ -167,7 +271,7 @@ const ClassView = () => {
             </div>
 
             {/* Main content */}
-            <main style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
+            <main style={{ padding: '24px' }}>
                 <div style={{ maxWidth: '860px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '14px', paddingBottom: '40px' }}>
                     {course.modules.map((module, index) => {
                         const modCompleted = module.topics.filter(t => progress?.completedTopics?.includes(t._id)).length;
@@ -185,7 +289,7 @@ const ClassView = () => {
 
                                 {/* Module header */}
                                 <button
-                                    onClick={() => setExpandedModule(isExpanded ? null : module._id)}
+                                    onClick={() => { const next = isExpanded ? null : module._id; setExpandedModule(next); if (next) fetchModuleContent(next); }}
                                     style={{ width: '100%', padding: '18px 20px', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', fontFamily: 'inherit' }}
                                 >
                                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -225,6 +329,89 @@ const ClassView = () => {
                                             style={{ overflow: 'hidden' }}
                                         >
                                             <div style={{ borderTop: `1px solid ${theme.border}`, padding: '16px 20px', background: `${theme.bg}80`, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+
+                                                {/* Module-level Tests */}
+                                                {(moduleTests[module._id] || []).length > 0 && (
+                                                    <div style={{ marginBottom: '6px' }}>
+                                                        <div style={{ fontSize: '11px', fontWeight: 700, color: '#6366f1', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                            <Timer size={11} /> Module Tests
+                                                        </div>
+                                                        {(moduleTests[module._id] || []).map(t => {
+                                                            const now = new Date();
+                                                            const isOpen = (!t.openAt || now >= new Date(t.openAt)) && (!t.closeAt || now <= new Date(t.closeAt));
+                                                            const isUpcoming = t.openAt && now < new Date(t.openAt);
+                                                            const isClosed = t.closeAt && now > new Date(t.closeAt);
+                                                            const statusLabel = isUpcoming ? 'Upcoming' : isClosed ? 'Closed' : 'Open Now';
+                                                            const statusColor = isUpcoming ? '#f59e0b' : isClosed ? theme.textMuted : '#22c55e';
+                                                            return (
+                                                                <div key={t._id} style={{ display: 'flex', alignItems: 'center', gap: '10px', background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '10px 14px', marginBottom: '6px' }}>
+                                                                    <Timer size={16} style={{ color: '#6366f1', flexShrink: 0 }} />
+                                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                                        <div style={{ fontSize: '13px', fontWeight: 600, color: theme.textPrimary }}>{t.title}</div>
+                                                                        <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>⏱ {t.timeLimitMinutes} min · ❓ {t.questions?.length || 0} questions</div>
+                                                                    </div>
+                                                                    <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '20px', background: isOpen ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.06)', color: statusColor, border: `1px solid ${isOpen ? 'rgba(34,197,94,0.3)' : theme.border}`, flexShrink: 0 }}>
+                                                                        {statusLabel}
+                                                                    </span>
+                                                                    {isOpen && (
+                                                                        <button onClick={() => startModuleTest(t)}
+                                                                            style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'rgba(99,102,241,0.85)', border: 'none', borderRadius: '7px', padding: '6px 14px', fontSize: '12px', color: '#fff', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}
+                                                                        >Start Test</button>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+
+                                                {/* Module-level Assignments */}
+                                                {(moduleAssignments[module._id] || []).length > 0 && (
+                                                    <div style={{ marginBottom: '6px' }}>
+                                                        <div style={{ fontSize: '11px', fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                            <ClipboardList size={11} /> Module Assignments
+                                                        </div>
+                                                        {(moduleAssignments[module._id] || []).map(a => {
+                                                            const sub = a.mySubmission;
+                                                            const isReturned = sub?.status === 'returned';
+                                                            const isSubmitted = sub?.status === 'submitted';
+                                                            const isPastDue = a.dueDate && new Date() > new Date(a.dueDate);
+                                                            const draft = subDraft[a._id] || {};
+                                                            return (
+                                                                <div key={a._id} style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '12px 14px', marginBottom: '8px' }}>
+                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                                                                        <ClipboardList size={15} style={{ color: '#f59e0b', flexShrink: 0 }} />
+                                                                        <div style={{ flex: 1 }}>
+                                                                            <div style={{ fontSize: '13px', fontWeight: 600, color: theme.textPrimary }}>{a.title}</div>
+                                                                            {a.dueDate && <div style={{ fontSize: '11px', color: isPastDue ? '#ef4444' : theme.textMuted }}>Due: {new Date(a.dueDate).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</div>}
+                                                                        </div>
+                                                                        {isReturned && <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 9px', borderRadius: '20px', background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)', flexShrink: 0 }}>✓ {sub.grade}/{a.maxPoints}</span>}
+                                                                        {isSubmitted && <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 9px', borderRadius: '20px', background: 'rgba(251,191,36,0.12)', color: '#f59e0b', border: '1px solid rgba(251,191,36,0.3)', flexShrink: 0 }}>Submitted</span>}
+                                                                    </div>
+                                                                    {isReturned && sub.feedback && (
+                                                                        <div style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: '7px', padding: '8px 10px', fontSize: '12px', color: theme.textSecondary, marginBottom: '8px', whiteSpace: 'pre-wrap' }}>
+                                                                            💬 {sub.feedback}
+                                                                        </div>
+                                                                    )}
+                                                                    {!isReturned && !isPastDue && (
+                                                                        <>
+                                                                            <textarea
+                                                                                placeholder="Your response…"
+                                                                                value={draft.text || ''}
+                                                                                onChange={e => setSubDraft(d => ({ ...d, [a._id]: { ...d[a._id], text: e.target.value } }))}
+                                                                                rows={3}
+                                                                                style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '7px', padding: '8px 10px', fontSize: '12px', color: theme.textPrimary, outline: 'none', fontFamily: 'inherit', resize: 'vertical', width: '100%', boxSizing: 'border-box', marginBottom: '8px' }}
+                                                                            />
+                                                                            <button onClick={() => submitModuleAssignment(a._id)} disabled={submittingAssignment[a._id]}
+                                                                                style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'rgba(251,191,36,0.85)', border: 'none', borderRadius: '7px', padding: '6px 14px', fontSize: '12px', color: '#fff', fontWeight: 700, cursor: submittingAssignment[a._id] ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: submittingAssignment[a._id] ? 0.6 : 1 }}
+                                                                            ><Send size={12} /> {submittingAssignment[a._id] ? 'Submitting…' : isSubmitted ? 'Resubmit' : 'Submit'}</button>
+                                                                        </>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+
                                                 {module.topics.map((topic) => {
                                                     const isDone = progress?.completedTopics?.includes(topic._id);
                                                     return (
@@ -287,35 +474,79 @@ const ClassView = () => {
                                                                 )}
 
                                                                 {/* Quiz buttons */}
-                                                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                                                {(() => { const tKey = topic.id || topic._id?.toString(); return topicQuizStatus[tKey]?.published; })() && (
-                                                                    <button
-                                                                        onClick={() => { const tKey = topic.id || topic._id?.toString(); setQuizTarget({ moduleId: module._id, topicId: tKey, topicTitle: topic.title }); setQuizModalOpen(true); }}
-                                                                        style={{
-                                                                            display: 'inline-flex', alignItems: 'center', gap: '5px',
-                                                                            padding: '4px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 700,
-                                                                            background: `linear-gradient(135deg,${accent.from},${accent.to})`,
-                                                                            border: 'none', color: '#fff', cursor: 'pointer', fontFamily: 'inherit',
-                                                                            boxShadow: `0 2px 8px ${accent.from}35`,
-                                                                        }}
-                                                                    >
-                                                                        📝 Take Test/Quiz
-                                                                    </button>
-                                                                )}
-                                                                <button
-                                                                    onClick={() => { setQuizTarget({ moduleId: module._id, topicId: topic._id || topic.id, topicTitle: topic.title }); setQuizModalOpen(true); }}
-                                                                    style={{
-                                                                        display: 'inline-flex', alignItems: 'center', gap: '5px',
-                                                                        padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 600,
-                                                                        background: 'none', border: `1px solid ${theme.border}`,
-                                                                        color: theme.textMuted, cursor: 'pointer', transition: 'all .15s', fontFamily: 'inherit'
-                                                                    }}
-                                                                    onMouseEnter={e => { e.currentTarget.style.borderColor = accent.from; e.currentTarget.style.color = accent.from; }}
-                                                                    onMouseLeave={e => { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.color = theme.textMuted; }}
-                                                                >
-                                                                    <Brain size={12} /> Generate Quiz with AI
-                                                                </button>
-                                                                </div>
+                                                                {(() => {
+                                                                    const tKey = topic.id || topic._id?.toString();
+                                                                    const quizStatus = topicQuizStatus[tKey];
+                                                                    const hasTierQuiz = quizStatus?.tiers && Object.values(quizStatus.tiers).some(t => t?.published);
+                                                                    const isExpanded = expandedTierTopic === tKey;
+                                                                    return (
+                                                                        <>
+                                                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                                                                {/* Tier Tests button — shown when teacher published any tier */}
+                                                                                {hasTierQuiz && (
+                                                                                    <button
+                                                                                        onClick={() => setExpandedTierTopic(prev => prev === tKey ? null : tKey)}
+                                                                                        style={{
+                                                                                            display: 'inline-flex', alignItems: 'center', gap: '5px',
+                                                                                            padding: '4px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 700,
+                                                                                            background: isExpanded ? `${accent.from}22` : `linear-gradient(135deg,${accent.from},${accent.to})`,
+                                                                                            border: isExpanded ? `1px solid ${accent.from}` : 'none',
+                                                                                            color: isExpanded ? accent.from : '#fff',
+                                                                                            cursor: 'pointer', fontFamily: 'inherit',
+                                                                                            boxShadow: isExpanded ? 'none' : `0 2px 8px ${accent.from}35`,
+                                                                                            transition: 'all .15s',
+                                                                                        }}
+                                                                                    >
+                                                                                        🎯 {isExpanded ? 'Hide Tests' : 'Take Test'}
+                                                                                    </button>
+                                                                                )}
+                                                                                {/* Generic teacher quiz button (non-tiered) */}
+                                                                                {quizStatus?.published && !hasTierQuiz && (
+                                                                                    <button
+                                                                                        onClick={() => { setQuizTarget({ moduleId: module._id, topicId: tKey, topicTitle: topic.title }); setQuizModalOpen(true); }}
+                                                                                        style={{
+                                                                                            display: 'inline-flex', alignItems: 'center', gap: '5px',
+                                                                                            padding: '4px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 700,
+                                                                                            background: `linear-gradient(135deg,${accent.from},${accent.to})`,
+                                                                                            border: 'none', color: '#fff', cursor: 'pointer', fontFamily: 'inherit',
+                                                                                            boxShadow: `0 2px 8px ${accent.from}35`,
+                                                                                        }}
+                                                                                    >
+                                                                                        📝 Take Test/Quiz
+                                                                                    </button>
+                                                                                )}
+                                                                                <button
+                                                                                    onClick={() => { setQuizTarget({ moduleId: module._id, topicId: topic._id || topic.id, topicTitle: topic.title }); setQuizModalOpen(true); }}
+                                                                                    style={{
+                                                                                        display: 'inline-flex', alignItems: 'center', gap: '5px',
+                                                                                        padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 600,
+                                                                                        background: 'none', border: `1px solid ${theme.border}`,
+                                                                                        color: theme.textMuted, cursor: 'pointer', transition: 'all .15s', fontFamily: 'inherit'
+                                                                                    }}
+                                                                                    onMouseEnter={e => { e.currentTarget.style.borderColor = accent.from; e.currentTarget.style.color = accent.from; }}
+                                                                                    onMouseLeave={e => { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.color = theme.textMuted; }}
+                                                                                >
+                                                                                    <Brain size={12} /> Practice with AI
+                                                                                </button>
+                                                                            </div>
+                                                                            {/* Tier quiz panel — expands below buttons */}
+                                                                            {hasTierQuiz && isExpanded && (
+                                                                                <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: `1px solid ${theme.border}` }}>
+                                                                                    <TierQuizPanel
+                                                                                        courseId={courseId}
+                                                                                        moduleId={module._id}
+                                                                                        topicId={tKey}
+                                                                                        topicTitle={topic.title}
+                                                                                        tierAvailability={quizStatus}
+                                                                                        topicScores={tierScores[tKey] || []}
+                                                                                        onScoresRefresh={refreshTierScores}
+                                                                                        theme={theme}
+                                                                                    />
+                                                                                </div>
+                                                                            )}
+                                                                        </>
+                                                                    );
+                                                                })()}
                                                             </div>
                                                         </div>
                                                     );
@@ -329,6 +560,91 @@ const ClassView = () => {
                     })}
                 </div>
             </main>
+
+            {/* Module Test Overlay */}
+            {activeModuleTest && (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 80, background: theme.bg, display: 'flex', flexDirection: 'column', fontFamily: "'DM Sans', sans-serif" }}>
+                    {/* Top bar */}
+                    <div style={{ background: theme.surface, borderBottom: `1px solid ${theme.border}`, padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <Timer size={18} style={{ color: '#6366f1' }} />
+                            <span style={{ fontWeight: 700, fontSize: '15px', color: theme.textPrimary }}>{activeModuleTest.test.title}</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Clock size={15} style={{ color: moduleTestTimeLeft < 300 ? '#ef4444' : theme.textMuted }} />
+                            <span style={{ fontFamily: "'Sora', sans-serif", fontWeight: 700, fontSize: '16px', color: moduleTestTimeLeft < 300 ? '#ef4444' : theme.textPrimary, minWidth: '52px', textAlign: 'right' }}>
+                                {fmtCountdown(moduleTestTimeLeft)}
+                            </span>
+                        </div>
+                    </div>
+
+                    {moduleTestResult ? (
+                        /* Result screen */
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '20px', padding: '40px 24px' }}>
+                            <div style={{ width: '72px', height: '72px', borderRadius: '50%', background: moduleTestResult.passed ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)', border: `2px solid ${moduleTestResult.passed ? '#22c55e' : '#ef4444'}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                {moduleTestResult.passed ? <CheckCircle size={36} style={{ color: '#22c55e' }} /> : <XCircle size={36} style={{ color: '#ef4444' }} />}
+                            </div>
+                            <div style={{ textAlign: 'center' }}>
+                                <div style={{ fontFamily: "'Sora', sans-serif", fontSize: '28px', fontWeight: 800, color: moduleTestResult.passed ? '#22c55e' : '#ef4444', marginBottom: '6px' }}>
+                                    {moduleTestResult.score}%
+                                </div>
+                                <div style={{ fontSize: '15px', fontWeight: 600, color: theme.textPrimary, marginBottom: '4px' }}>
+                                    {moduleTestResult.passed ? 'Test Passed!' : 'Test Not Passed'}
+                                </div>
+                                <div style={{ fontSize: '13px', color: theme.textMuted }}>
+                                    {moduleTestResult.correctCount} / {moduleTestResult.totalQuestions} correct
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => { setActiveModuleTest(null); setModuleTestResult(null); setModuleTestAnswers({}); moduleTestAnswersRef.current = {}; fetchModuleContent(expandedModule); }}
+                                style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', color: '#fff', border: 'none', borderRadius: '10px', padding: '12px 32px', fontWeight: 700, fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit' }}
+                            >Done</button>
+                        </div>
+                    ) : (
+                        /* Questions */
+                        <div style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '700px', margin: '0 auto', width: '100%' }}>
+                            {activeModuleTest.questions.map((q, qi) => (
+                                <div key={qi} style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '14px', padding: '18px 20px' }}>
+                                    <div style={{ fontSize: '14px', fontWeight: 600, color: theme.textPrimary, marginBottom: '14px', lineHeight: 1.5 }}>
+                                        <span style={{ color: '#6366f1', fontWeight: 700 }}>{qi + 1}.</span> {q.question}
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        {q.options.map((opt, oi) => {
+                                            const label = opt.label || String.fromCharCode(65 + oi);
+                                            const isSelected = moduleTestAnswers[qi] === label;
+                                            return (
+                                                <button
+                                                    key={oi}
+                                                    onClick={() => {
+                                                        setModuleTestAnswers(a => ({ ...a, [qi]: label }));
+                                                        moduleTestAnswersRef.current = { ...moduleTestAnswersRef.current, [qi]: label };
+                                                    }}
+                                                    style={{
+                                                        textAlign: 'left', padding: '10px 14px', borderRadius: '9px', fontSize: '13px', fontWeight: isSelected ? 700 : 500,
+                                                        background: isSelected ? 'rgba(99,102,241,0.15)' : theme.bg,
+                                                        border: `1.5px solid ${isSelected ? '#6366f1' : theme.border}`,
+                                                        color: isSelected ? '#6366f1' : theme.textPrimary,
+                                                        cursor: 'pointer', transition: 'all .15s', fontFamily: 'inherit',
+                                                    }}
+                                                >
+                                                    <span style={{ fontWeight: 700, marginRight: '8px' }}>{label}.</span>{opt.text}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            ))}
+
+                            <button
+                                onClick={submitModuleTest}
+                                style={{ alignSelf: 'center', background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', color: '#fff', border: 'none', borderRadius: '10px', padding: '12px 40px', fontWeight: 700, fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 4px 14px rgba(99,102,241,0.4)', marginTop: '8px', marginBottom: '40px' }}
+                            >
+                                Submit Test
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
 
             {selectedResource && (
                 <ResourcePlayer

@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Save, CheckSquare, Square, Upload, X, FileText, Calendar, Edit, Zap, Brain } from 'lucide-react';
+import { Plus, Trash2, Save, CheckSquare, Square, Upload, X, FileText, Calendar, Edit, Zap, Brain, ClipboardList, Timer, Users, BarChart2, ChevronDown, ChevronUp } from 'lucide-react';
 import api from '../api/axios';
 import { useAppTheme } from '../hooks/useAppTheme';
 import TeacherQuizEditor from './TeacherQuizEditor';
+import AssignmentReviewPanel from './AssignmentReviewPanel';
+import ClassTestResultsModal from './ClassTestResultsModal';
 
 const BLOOM_LEVELS = [
     { key: 'remember',   label: 'Remember' },
@@ -56,6 +58,26 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
     const [quizNumQs, setQuizNumQs] = useState({});              // { [topicId]: number }
     const [quizEditorOpen, setQuizEditorOpen] = useState(null);  // { topicId, topicTitle } | null
     const [publishingTopic, setPublishingTopic] = useState(null); // topicId currently being toggled
+
+    // Assignment state
+    const [assignmentForm, setAssignmentForm] = useState(null);
+    const [assignmentLoading, setAssignmentLoading] = useState({});
+    const [assignmentReview, setAssignmentReview] = useState(null);
+    const [uploadingAttachment, setUploadingAttachment] = useState(false);
+
+    // Class Test state
+    const [testForm, setTestForm] = useState(null);
+    const [testLoading, setTestLoading] = useState({});
+    const [testResults, setTestResults] = useState(null);        // { testId, testTitle } | null
+    const [testGenerating, setTestGenerating] = useState({});    // { [testId]: bool }
+    const [testBloom, setTestBloom] = useState({});              // { [scopeId]: bloomLevel }
+    const [testDifficulty, setTestDifficulty] = useState({});    // { [scopeId]: difficulty }
+
+    // Module-level assignment + test state
+    const [testPanelModule, setTestPanelModule] = useState(null);
+    const [moduleTests, setModuleTests] = useState({});           // { [moduleId]: ClassTest[] }
+    const [assignmentPanelModule, setAssignmentPanelModule] = useState(null);
+    const [moduleAssignments, setModuleAssignments] = useState({});
 
     useEffect(() => { setCourseTitle(initialTitle); setCourseDescription(initialDescription); }, [initialTitle, initialDescription]);
 
@@ -160,6 +182,172 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
         }
     };
 
+    // ─── Assignment helpers ───────────────────────────────────────────────────
+
+    const openAssignmentForm = (scopeId, existing = null) => {
+        setAssignmentForm({
+            mode: existing ? 'edit' : 'create',
+            scopeId,
+            data: existing ? { ...existing } : { title: '', instructions: '', dueDate: '', maxPoints: 100, attachments: [] },
+        });
+    };
+
+    const handleSaveAssignment = async () => {
+        if (!assignmentForm) return;
+        const { mode, scopeId, data } = assignmentForm;
+        const loadKey = scopeId;
+        setAssignmentLoading(l => ({ ...l, [loadKey]: true }));
+        try {
+            if (mode === 'create') {
+                const payload = { courseId, ...data, moduleId: scopeId };
+                await api.post('/assignments', payload);
+            } else {
+                await api.put(`/assignments/${data._id}`, data);
+            }
+            setAssignmentForm(null);
+            await fetchModuleAssignments(scopeId);
+        } catch (err) {
+            notify('error', err.response?.data?.error || 'Failed to save assignment');
+        } finally {
+            setAssignmentLoading(l => ({ ...l, [loadKey]: false }));
+        }
+    };
+
+    const handlePublishAssignment = async (assignmentId, scopeId, publish) => {
+        try {
+            await api.patch(`/assignments/${assignmentId}/publish`, { published: publish });
+            const updater = list => (list || []).map(x => x._id === assignmentId ? { ...x, isPublished: publish } : x);
+            setModuleAssignments(a => ({ ...a, [scopeId]: updater(a[scopeId]) }));
+        } catch (err) {
+            notify('error', err.response?.data?.error || 'Failed to update');
+        }
+    };
+
+    const handleDeleteAssignment = async (assignmentId, scopeId) => {
+        if (!confirm('Delete this assignment and all student submissions?')) return;
+        try {
+            await api.delete(`/assignments/${assignmentId}`);
+            const remover = list => (list || []).filter(x => x._id !== assignmentId);
+            setModuleAssignments(a => ({ ...a, [scopeId]: remover(a[scopeId]) }));
+        } catch (err) {
+            notify('error', err.response?.data?.error || 'Failed to delete');
+        }
+    };
+
+    const handleUploadAttachment = async (e) => {
+        const file = e.target.files[0];
+        if (!file || !assignmentForm) return;
+        setUploadingAttachment(true);
+        try {
+            const fd = new FormData();
+            fd.append('file', file);
+            const res = await api.post('/upload', fd, { headers: { 'Content-Type': null } });
+            setAssignmentForm(f => ({ ...f, data: { ...f.data, attachments: [...(f.data.attachments || []), { fileName: file.name, fileUrl: res.data.url }] } }));
+        } catch (err) {
+            notify('error', 'Attachment upload failed');
+        } finally {
+            setUploadingAttachment(false);
+        }
+    };
+
+    // ─── Module-level Assignment helpers ─────────────────────────────────────
+
+    const fetchModuleAssignments = async (moduleId) => {
+        try {
+            const res = await api.get(`/assignments/module/${courseId}/${moduleId}`);
+            setModuleAssignments(a => ({ ...a, [moduleId]: res.data.assignments || [] }));
+        } catch { setModuleAssignments(a => ({ ...a, [moduleId]: [] })); }
+    };
+
+    const toggleModuleAssignmentPanel = async (moduleId) => {
+        const next = assignmentPanelModule === moduleId ? null : moduleId;
+        setAssignmentPanelModule(next);
+        setTestPanelModule(null);
+        if (next && !moduleAssignments[next]) await fetchModuleAssignments(next);
+    };
+
+    const fetchModuleTests = async (moduleId) => {
+        try {
+            const res = await api.get(`/class-tests/module/${courseId}/${moduleId}`);
+            setModuleTests(t => ({ ...t, [moduleId]: res.data.tests || [] }));
+        } catch { setModuleTests(t => ({ ...t, [moduleId]: [] })); }
+    };
+
+    const toggleModuleTestPanel = async (moduleId) => {
+        const next = testPanelModule === moduleId ? null : moduleId;
+        setTestPanelModule(next);
+        setAssignmentPanelModule(null);
+        if (next && !moduleTests[next]) await fetchModuleTests(next);
+    };
+
+    // ─── Class Test helpers ───────────────────────────────────────────────────
+
+    const openTestForm = (scopeId, existing = null, scope = 'module') => {
+        setTestForm({
+            mode: existing ? 'edit' : 'create',
+            scope,
+            scopeId,
+            data: existing ? { ...existing } : { title: '', instructions: '', openAt: '', closeAt: '', timeLimitMinutes: 30, maxAttempts: 1 },
+        });
+    };
+
+    const handleSaveTest = async () => {
+        if (!testForm) return;
+        const { mode, scopeId, data } = testForm;
+        setTestLoading(l => ({ ...l, [scopeId]: true }));
+        try {
+            if (mode === 'create') {
+                const payload = { courseId, ...data, timeLimitMinutes: Number(data.timeLimitMinutes) || 30, moduleId: scopeId };
+                await api.post('/class-tests', payload);
+            } else {
+                await api.put(`/class-tests/${data._id}`, { ...data, timeLimitMinutes: Number(data.timeLimitMinutes) || 30 });
+            }
+            setTestForm(null);
+            await fetchModuleTests(scopeId);
+        } catch (err) {
+            notify('error', err.response?.data?.error || 'Failed to save test');
+        } finally {
+            setTestLoading(l => ({ ...l, [scopeId]: false }));
+        }
+    };
+
+    const handlePublishTest = async (testId, scopeId, publish) => {
+        try {
+            await api.patch(`/class-tests/${testId}/publish`, { published: publish });
+            const updater = list => (list || []).map(x => x._id === testId ? { ...x, isPublished: publish } : x);
+            setModuleTests(t => ({ ...t, [scopeId]: updater(t[scopeId]) }));
+        } catch (err) {
+            notify('error', err.response?.data?.error || 'Failed to update');
+        }
+    };
+
+    const handleDeleteTest = async (testId, scopeId) => {
+        if (!confirm('Delete this test and all student attempts?')) return;
+        try {
+            await api.delete(`/class-tests/${testId}`);
+            const remover = list => (list || []).filter(x => x._id !== testId);
+            setModuleTests(t => ({ ...t, [scopeId]: remover(t[scopeId]) }));
+        } catch (err) {
+            notify('error', err.response?.data?.error || 'Failed to delete');
+        }
+    };
+
+    const handleGenerateTestQuestions = async (testId, scopeId, title) => {
+        const bloom = testBloom[scopeId] || 'understand';
+        const diff = testDifficulty[scopeId] || 'Intermediate';
+        setTestGenerating(g => ({ ...g, [testId]: true }));
+        try {
+            const res = await api.post(`/class-tests/${testId}/generate`, { bloomLevel: bloom, difficulty: diff, numQuestions: 10, topicTitle: title });
+            const updater = list => (list || []).map(x => x._id === testId ? res.data.test : x);
+            setModuleTests(t => ({ ...t, [scopeId]: updater(t[scopeId]) }));
+            notify('success', `Generated ${res.data.questions} questions`);
+        } catch (err) {
+            notify('error', err.response?.data?.error || 'Generation failed. Upload course materials first.');
+        } finally {
+            setTestGenerating(g => ({ ...g, [testId]: false }));
+        }
+    };
+
     const saveCurriculum = async () => {
         setSaving(true);
         try {
@@ -186,10 +374,17 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
                 difficulty: settings.difficulty,
                 bloomLevel: settings.bloomLevel,
                 numQuestions,
-            });
+            }, { timeout: 120000 });
+            const tierKey = (settings.difficulty || 'Intermediate').toLowerCase();
             setTopicQuizStatus(s => ({
                 ...s,
-                [topic.id]: { difficulty: settings.difficulty, bloomLevel: settings.bloomLevel, questionCount: numQuestions, published: false },
+                [topic.id]: {
+                    ...s[topic.id],
+                    tiers: {
+                        ...(s[topic.id]?.tiers || {}),
+                        [tierKey]: { questionCount: numQuestions, published: false },
+                    },
+                },
             }));
             setQuizPanelOpen(null);
         } catch (err) {
@@ -204,6 +399,29 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
         try {
             await api.post('/rag/publish-quiz', { courseId, topicId, published: publish });
             setTopicQuizStatus(s => ({ ...s, [topicId]: { ...s[topicId], published: publish } }));
+        } catch {
+            notify('error', 'Failed to update publish status. Please try again.');
+        } finally {
+            setPublishingTopic(null);
+        }
+    };
+
+    const handlePublishQuizTier = async (topicId, tier, publish) => {
+        const key = `${topicId}-${tier}`;
+        setPublishingTopic(key);
+        try {
+            await api.post('/rag/publish-quiz-tier', { courseId, topicId, tier, published: publish });
+            setTopicQuizStatus(s => ({
+                ...s,
+                [topicId]: {
+                    ...s[topicId],
+                    tiers: {
+                        ...(s[topicId]?.tiers || {}),
+                        [tier]: { ...(s[topicId]?.tiers?.[tier] || {}), published: publish },
+                    },
+                },
+            }));
+            notify('success', `${tier.charAt(0).toUpperCase() + tier.slice(1)} quiz ${publish ? 'published' : 'unpublished'} successfully.`);
         } catch {
             notify('error', 'Failed to update publish status. Please try again.');
         } finally {
@@ -377,12 +595,224 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
                                         style={{ background: 'transparent', fontSize: '12px', color: theme.textSecondary, width: '80px', border: 'none', outline: 'none', fontFamily: 'inherit' }}
                                     />
                                 </div>
+                                {courseId && (
+                                    <button onClick={() => toggleModuleAssignmentPanel(module.id)}
+                                        style={{ display: 'flex', alignItems: 'center', gap: '4px', background: assignmentPanelModule === module.id ? 'rgba(251,191,36,0.18)' : 'rgba(251,191,36,0.08)', border: `1px solid ${assignmentPanelModule === module.id ? 'rgba(251,191,36,0.5)' : 'rgba(251,191,36,0.25)'}`, borderRadius: '6px', padding: '4px 9px', cursor: 'pointer', color: '#f59e0b', fontSize: '11px', fontWeight: 700, fontFamily: 'inherit', flexShrink: 0 }}
+                                    ><ClipboardList size={11} /> Assignment</button>
+                                )}
+                                {courseId && (
+                                    <button onClick={() => toggleModuleTestPanel(module.id)}
+                                        style={{ display: 'flex', alignItems: 'center', gap: '4px', background: testPanelModule === module.id ? 'rgba(99,102,241,0.18)' : 'rgba(99,102,241,0.08)', border: `1px solid ${testPanelModule === module.id ? 'rgba(99,102,241,0.5)' : 'rgba(99,102,241,0.25)'}`, borderRadius: '6px', padding: '4px 9px', cursor: 'pointer', color: '#6366f1', fontSize: '11px', fontWeight: 700, fontFamily: 'inherit', flexShrink: 0 }}
+                                    ><Timer size={11} /> Test</button>
+                                )}
                                 <button onClick={() => handleDeleteModule(mIndex)}
                                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: theme.textMuted, display: 'flex', flexShrink: 0 }}
                                     onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
                                     onMouseLeave={e => e.currentTarget.style.color = theme.textMuted}
                                 ><Trash2 size={15} /></button>
                             </div>
+
+                            {/* Module-level Assignment panel */}
+                            {assignmentPanelModule === module.id && (
+                                <div style={{ margin: '0 18px 10px', background: 'rgba(251,191,36,0.05)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: '10px', padding: '14px 16px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                                        <span style={{ fontSize: '11px', fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.07em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                            <ClipboardList size={12} /> Module Assignments
+                                        </span>
+                                        <button onClick={() => openAssignmentForm(module.id, null, 'module')}
+                                            style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer', color: '#f59e0b', fontSize: '11px', fontWeight: 700, fontFamily: 'inherit' }}
+                                        ><Plus size={11} /> New Assignment</button>
+                                    </div>
+                                    {(moduleAssignments[module.id] || []).length === 0 && assignmentForm?.scopeId !== module.id && (
+                                        <div style={{ fontSize: '12px', color: theme.textMuted, textAlign: 'center', padding: '8px 0' }}>No module assignments yet.</div>
+                                    )}
+                                    {(moduleAssignments[module.id] || []).map(a => (
+                                        <div key={a._id} style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '10px 12px', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div style={{ fontSize: '13px', fontWeight: 600, color: theme.textPrimary }}>{a.title}</div>
+                                                <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>
+                                                    {a.dueDate && `Due: ${new Date(a.dueDate).toLocaleDateString()}`} · Max {a.maxPoints} pts
+                                                </div>
+                                            </div>
+                                            <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '20px', background: a.isPublished ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.06)', color: a.isPublished ? '#22c55e' : theme.textMuted, border: `1px solid ${a.isPublished ? 'rgba(34,197,94,0.3)' : theme.border}`, flexShrink: 0 }}>
+                                                {a.isPublished ? '✓ Live' : 'Draft'}
+                                            </span>
+                                            <button onClick={() => setAssignmentReview({ assignmentId: a._id, maxPoints: a.maxPoints, title: a.title })}
+                                                style={{ display: 'flex', alignItems: 'center', gap: '3px', background: 'none', border: `1px solid ${theme.border}`, borderRadius: '5px', padding: '3px 7px', cursor: 'pointer', color: theme.textMuted, fontSize: '10px', fontWeight: 600, fontFamily: 'inherit', flexShrink: 0 }}
+                                                onMouseEnter={e => { e.currentTarget.style.borderColor = '#f59e0b'; e.currentTarget.style.color = '#f59e0b'; }}
+                                                onMouseLeave={e => { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.color = theme.textMuted; }}
+                                            ><Users size={10} /> Submissions</button>
+                                            <button onClick={() => openAssignmentForm(module.id, a, 'module')}
+                                                style={{ display: 'flex', background: 'none', border: 'none', cursor: 'pointer', color: theme.textMuted, padding: '2px' }}
+                                                onMouseEnter={e => e.currentTarget.style.color = '#f59e0b'}
+                                                onMouseLeave={e => e.currentTarget.style.color = theme.textMuted}
+                                            ><Edit size={13} /></button>
+                                            <button onClick={() => handlePublishAssignment(a._id, module.id, !a.isPublished, 'module')}
+                                                style={{ display: 'flex', background: 'none', border: 'none', cursor: 'pointer', color: a.isPublished ? '#22c55e' : theme.textMuted, padding: '2px', fontSize: '10px', fontWeight: 700, fontFamily: 'inherit' }}
+                                            >{a.isPublished ? '↓' : '↑'}</button>
+                                            <button onClick={() => handleDeleteAssignment(a._id, module.id, 'module')}
+                                                style={{ display: 'flex', background: 'none', border: 'none', cursor: 'pointer', color: theme.textMuted, padding: '2px' }}
+                                                onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
+                                                onMouseLeave={e => e.currentTarget.style.color = theme.textMuted}
+                                            ><Trash2 size={13} /></button>
+                                        </div>
+                                    ))}
+                                    {assignmentForm?.scopeId === module.id && assignmentForm?.scope === 'module' && (
+                                        <div style={{ background: theme.bg, border: '1px solid rgba(251,191,36,0.25)', borderRadius: '8px', padding: '14px', marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                            <div style={{ fontSize: '11px', fontWeight: 700, color: '#f59e0b', marginBottom: '2px' }}>{assignmentForm.mode === 'create' ? 'New Assignment' : 'Edit Assignment'}</div>
+                                            <input placeholder="Assignment title *" value={assignmentForm.data.title}
+                                                onChange={e => setAssignmentForm(f => ({ ...f, data: { ...f.data, title: e.target.value } }))}
+                                                style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '6px', padding: '7px 10px', fontSize: '13px', color: theme.textPrimary, outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }}
+                                            />
+                                            <textarea placeholder="Instructions" value={assignmentForm.data.instructions}
+                                                onChange={e => setAssignmentForm(f => ({ ...f, data: { ...f.data, instructions: e.target.value } }))}
+                                                rows={2} style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '6px', padding: '7px 10px', fontSize: '13px', color: theme.textPrimary, outline: 'none', fontFamily: 'inherit', resize: 'vertical', width: '100%', boxSizing: 'border-box' }}
+                                            />
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                                                <div>
+                                                    <div style={{ fontSize: '10px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>Due Date</div>
+                                                    <input type="datetime-local" value={assignmentForm.data.dueDate ? assignmentForm.data.dueDate.slice(0, 16) : ''}
+                                                        onChange={e => setAssignmentForm(f => ({ ...f, data: { ...f.data, dueDate: e.target.value } }))}
+                                                        style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '6px', padding: '6px 8px', fontSize: '12px', color: theme.textPrimary, outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <div style={{ fontSize: '10px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>Max Points</div>
+                                                    <input type="number" min="1" value={assignmentForm.data.maxPoints}
+                                                        onChange={e => setAssignmentForm(f => ({ ...f, data: { ...f.data, maxPoints: parseInt(e.target.value) || 100 } }))}
+                                                        style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '6px', padding: '6px 8px', fontSize: '12px', color: theme.textPrimary, outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                                                <button onClick={() => setAssignmentForm(null)} style={{ background: 'none', border: `1px solid ${theme.border}`, borderRadius: '6px', padding: '6px 14px', fontSize: '12px', color: theme.textMuted, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 }}>Cancel</button>
+                                                <button onClick={handleSaveAssignment} disabled={assignmentLoading[module.id] || !assignmentForm.data.title.trim()}
+                                                    style={{ background: 'rgba(251,191,36,0.85)', border: 'none', borderRadius: '6px', padding: '6px 16px', fontSize: '12px', color: '#fff', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700, opacity: assignmentLoading[module.id] ? 0.6 : 1 }}
+                                                >{assignmentLoading[module.id] ? 'Saving…' : 'Save Assignment'}</button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Module-level Test panel */}
+                            {testPanelModule === module.id && (
+                                <div style={{ margin: '0 18px 10px', background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: '10px', padding: '14px 16px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                                        <span style={{ fontSize: '11px', fontWeight: 700, color: '#6366f1', textTransform: 'uppercase', letterSpacing: '0.07em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                            <Timer size={12} /> Module Tests
+                                        </span>
+                                        <button onClick={() => openTestForm(module.id, null, 'module')}
+                                            style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer', color: '#6366f1', fontSize: '11px', fontWeight: 700, fontFamily: 'inherit' }}
+                                        ><Plus size={11} /> New Test</button>
+                                    </div>
+                                    {(moduleTests[module.id] || []).length === 0 && testForm?.scopeId !== module.id && (
+                                        <div style={{ fontSize: '12px', color: theme.textMuted, textAlign: 'center', padding: '8px 0' }}>No module tests yet.</div>
+                                    )}
+                                    {(moduleTests[module.id] || []).map(t => (
+                                        <div key={t._id} style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '10px 12px', marginBottom: '6px' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <div style={{ fontSize: '13px', fontWeight: 600, color: theme.textPrimary }}>{t.title}</div>
+                                                    <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                                        <span>⏱ {t.timeLimitMinutes} min</span>
+                                                        <span>❓ {t.questions?.length || 0} questions</span>
+                                                        {t.openAt && <span>📅 {new Date(t.openAt).toLocaleDateString()}</span>}
+                                                    </div>
+                                                </div>
+                                                <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '20px', background: t.isPublished ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.06)', color: t.isPublished ? '#22c55e' : theme.textMuted, border: `1px solid ${t.isPublished ? 'rgba(34,197,94,0.3)' : theme.border}`, flexShrink: 0 }}>
+                                                    {t.isPublished ? '✓ Live' : 'Draft'}
+                                                </span>
+                                                <button onClick={() => setTestResults({ testId: t._id, testTitle: t.title })}
+                                                    style={{ display: 'flex', alignItems: 'center', gap: '3px', background: 'none', border: `1px solid ${theme.border}`, borderRadius: '5px', padding: '3px 7px', cursor: 'pointer', color: theme.textMuted, fontSize: '10px', fontWeight: 600, fontFamily: 'inherit', flexShrink: 0 }}
+                                                    onMouseEnter={e => { e.currentTarget.style.borderColor = '#6366f1'; e.currentTarget.style.color = '#6366f1'; }}
+                                                    onMouseLeave={e => { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.color = theme.textMuted; }}
+                                                ><BarChart2 size={10} /> Results</button>
+                                                <button onClick={() => openTestForm(module.id, t, 'module')}
+                                                    style={{ display: 'flex', background: 'none', border: 'none', cursor: 'pointer', color: theme.textMuted, padding: '2px' }}
+                                                    onMouseEnter={e => e.currentTarget.style.color = '#6366f1'}
+                                                    onMouseLeave={e => e.currentTarget.style.color = theme.textMuted}
+                                                ><Edit size={13} /></button>
+                                                <button onClick={() => handlePublishTest(t._id, module.id, !t.isPublished, 'module')}
+                                                    style={{ display: 'flex', background: 'none', border: 'none', cursor: 'pointer', color: t.isPublished ? '#22c55e' : theme.textMuted, padding: '2px', fontSize: '10px', fontWeight: 700, fontFamily: 'inherit' }}
+                                                >{t.isPublished ? '↓' : '↑'}</button>
+                                                <button onClick={() => handleDeleteTest(t._id, module.id, 'module')}
+                                                    style={{ display: 'flex', background: 'none', border: 'none', cursor: 'pointer', color: theme.textMuted, padding: '2px' }}
+                                                    onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
+                                                    onMouseLeave={e => e.currentTarget.style.color = theme.textMuted}
+                                                ><Trash2 size={13} /></button>
+                                            </div>
+                                            <div style={{ marginTop: '8px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', borderTop: `1px solid ${theme.border}`, paddingTop: '8px' }}>
+                                                <span style={{ fontSize: '10px', color: theme.textMuted, fontWeight: 600 }}>AI Generate:</span>
+                                                <select value={testBloom[module.id] || 'understand'}
+                                                    onChange={e => setTestBloom(b => ({ ...b, [module.id]: e.target.value }))}
+                                                    style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '5px', padding: '3px 7px', fontSize: '11px', color: theme.textPrimary, outline: 'none', fontFamily: 'inherit' }}
+                                                >{BLOOM_LEVELS.map(b => <option key={b.key} value={b.key}>{b.label}</option>)}</select>
+                                                <select value={testDifficulty[module.id] || 'Intermediate'}
+                                                    onChange={e => setTestDifficulty(d => ({ ...d, [module.id]: e.target.value }))}
+                                                    style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '5px', padding: '3px 7px', fontSize: '11px', color: theme.textPrimary, outline: 'none', fontFamily: 'inherit' }}
+                                                >{DIFFICULTIES.map(d => <option key={d} value={d}>{d}</option>)}</select>
+                                                <button onClick={() => handleGenerateTestQuestions(t._id, module.id, module.title, 'module')}
+                                                    disabled={testGenerating[t._id]}
+                                                    style={{ display: 'flex', alignItems: 'center', gap: '4px', background: testGenerating[t._id] ? theme.border : 'rgba(99,102,241,0.85)', border: 'none', borderRadius: '5px', padding: '4px 12px', fontSize: '11px', color: '#fff', fontWeight: 700, cursor: testGenerating[t._id] ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}
+                                                ><Zap size={10} /> {testGenerating[t._id] ? 'Generating…' : t.questions?.length ? 'Regenerate' : 'Generate 10 Qs'}</button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {testForm?.scopeId === module.id && testForm?.scope === 'module' && (
+                                        <div style={{ background: theme.bg, border: '1px solid rgba(99,102,241,0.25)', borderRadius: '8px', padding: '14px', marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                            <div style={{ fontSize: '11px', fontWeight: 700, color: '#6366f1', marginBottom: '2px' }}>{testForm.mode === 'create' ? 'New Module Test' : 'Edit Test'}</div>
+                                            <input placeholder="Test title *" value={testForm.data.title}
+                                                onChange={e => setTestForm(f => ({ ...f, data: { ...f.data, title: e.target.value } }))}
+                                                style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '6px', padding: '7px 10px', fontSize: '13px', color: theme.textPrimary, outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }}
+                                            />
+                                            <textarea placeholder="Instructions for students" value={testForm.data.instructions}
+                                                onChange={e => setTestForm(f => ({ ...f, data: { ...f.data, instructions: e.target.value } }))}
+                                                rows={2} style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '6px', padding: '7px 10px', fontSize: '13px', color: theme.textPrimary, outline: 'none', fontFamily: 'inherit', resize: 'vertical', width: '100%', boxSizing: 'border-box' }}
+                                            />
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                                                <div>
+                                                    <div style={{ fontSize: '10px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>Opens</div>
+                                                    <input type="datetime-local" value={testForm.data.openAt ? testForm.data.openAt.slice(0, 16) : ''}
+                                                        onChange={e => setTestForm(f => ({ ...f, data: { ...f.data, openAt: e.target.value } }))}
+                                                        style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '6px', padding: '6px 8px', fontSize: '12px', color: theme.textPrimary, outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <div style={{ fontSize: '10px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>Closes</div>
+                                                    <input type="datetime-local" value={testForm.data.closeAt ? testForm.data.closeAt.slice(0, 16) : ''}
+                                                        onChange={e => setTestForm(f => ({ ...f, data: { ...f.data, closeAt: e.target.value } }))}
+                                                        style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '6px', padding: '6px 8px', fontSize: '12px', color: theme.textPrimary, outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <div style={{ fontSize: '10px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>Time Limit (min)</div>
+                                                    <input type="number" min="5" max="180" value={testForm.data.timeLimitMinutes}
+                                                        onChange={e => setTestForm(f => ({ ...f, data: { ...f.data, timeLimitMinutes: parseInt(e.target.value) || 30 } }))}
+                                                        style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '6px', padding: '6px 8px', fontSize: '12px', color: theme.textPrimary, outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <div style={{ fontSize: '10px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>Max Attempts</div>
+                                                    <select value={testForm.data.maxAttempts}
+                                                        onChange={e => setTestForm(f => ({ ...f, data: { ...f.data, maxAttempts: parseInt(e.target.value) } }))}
+                                                        style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '6px', padding: '6px 8px', fontSize: '12px', color: theme.textPrimary, outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }}
+                                                    >
+                                                        <option value={1}>1 (No retake)</option>
+                                                        <option value={2}>2 (One retake)</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                                                <button onClick={() => setTestForm(null)} style={{ background: 'none', border: `1px solid ${theme.border}`, borderRadius: '6px', padding: '6px 14px', fontSize: '12px', color: theme.textMuted, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 }}>Cancel</button>
+                                                <button onClick={handleSaveTest} disabled={testLoading[module.id] || !testForm.data.title.trim()}
+                                                    style={{ background: 'rgba(99,102,241,0.85)', border: 'none', borderRadius: '6px', padding: '6px 16px', fontSize: '12px', color: '#fff', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700, opacity: testLoading[module.id] ? 0.6 : 1 }}
+                                                >{testLoading[module.id] ? 'Saving…' : 'Save Test'}</button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
 
                             {/* Topics */}
                             <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -435,20 +865,32 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
                                                     >
                                                         <Edit size={11} /> Edit
                                                     </button>
-                                                    <button
-                                                        onClick={() => handlePublishQuiz(topic.id, !topicQuizStatus[topic.id].published)}
-                                                        disabled={publishingTopic === topic.id}
-                                                        title={topicQuizStatus[topic.id].published ? 'Unpublish quiz' : 'Publish quiz for students'}
-                                                        style={{ display: 'flex', alignItems: 'center', gap: '4px', background: topicQuizStatus[topic.id].published ? 'rgba(34,197,94,0.12)' : 'none', border: `1px solid ${topicQuizStatus[topic.id].published ? 'rgba(34,197,94,0.4)' : theme.border}`, borderRadius: '6px', padding: '3px 8px', cursor: publishingTopic === topic.id ? 'wait' : 'pointer', color: topicQuizStatus[topic.id].published ? '#22c55e' : theme.textMuted, fontSize: '11px', fontWeight: 700, fontFamily: 'inherit', flexShrink: 0, transition: 'all .15s' }}
-                                                    >
-                                                        {publishingTopic === topic.id ? '…' : topicQuizStatus[topic.id].published ? '✓ Published' : 'Publish'}
-                                                    </button>
+                                                    {[
+                                                        { tier: 'beginner',     label: 'Beginner',     color: '#34d399' },
+                                                        { tier: 'intermediate', label: 'Intermediate', color: '#fbbf24' },
+                                                        { tier: 'advanced',     label: 'Advanced',     color: '#f43f5e' },
+                                                    ].map(({ tier, label, color }) => {
+                                                        const td = topicQuizStatus[topic.id]?.tiers?.[tier];
+                                                        if (!td) return null;
+                                                        const isPublished = td.published;
+                                                        const busyKey = `${topic.id}-${tier}`;
+                                                        return (
+                                                            <button key={tier}
+                                                                onClick={() => handlePublishQuizTier(topic.id, tier, !isPublished)}
+                                                                disabled={publishingTopic === busyKey}
+                                                                title={isPublished ? `Unpublish ${label} quiz` : `Publish ${label} quiz for students`}
+                                                                style={{ display: 'flex', alignItems: 'center', gap: '3px', background: isPublished ? `${color}18` : 'none', border: `1px solid ${isPublished ? color + '55' : theme.border}`, borderRadius: '6px', padding: '3px 8px', cursor: publishingTopic === busyKey ? 'wait' : 'pointer', color: isPublished ? color : theme.textMuted, fontSize: '10px', fontWeight: 700, fontFamily: 'inherit', flexShrink: 0, transition: 'all .15s', whiteSpace: 'nowrap' }}
+                                                            >
+                                                                {publishingTopic === busyKey ? '…' : isPublished ? `✓ ${label}` : `Publish ${label}`}
+                                                            </button>
+                                                        );
+                                                    })}
                                                 </>
                                             )}
 
                                             {/* Generate Quiz button */}
                                             <button
-                                                onClick={() => setQuizPanelOpen(quizPanelOpen === topic.id ? null : topic.id)}
+                                                onClick={() => { setQuizPanelOpen(quizPanelOpen === topic.id ? null : topic.id); }}
                                                 title="Generate Quiz"
                                                 style={{ display: 'flex', alignItems: 'center', gap: '4px', background: quizPanelOpen === topic.id ? `${accent.from}18` : 'none', border: `1px solid ${quizPanelOpen === topic.id ? accent.from : theme.border}`, borderRadius: '6px', padding: '3px 8px', cursor: 'pointer', color: quizPanelOpen === topic.id ? accent.from : theme.textMuted, fontSize: '11px', fontWeight: 600, fontFamily: 'inherit', flexShrink: 0, transition: 'all .15s' }}
                                                 onMouseEnter={e => { if (quizPanelOpen !== topic.id) { e.currentTarget.style.borderColor = accent.from; e.currentTarget.style.color = accent.from; } }}
@@ -513,12 +955,25 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
                                                         style={{ display: 'flex', alignItems: 'center', gap: '6px', background: quizGenerating[topic.id] ? theme.border : aGrad, border: 'none', color: '#fff', padding: '7px 16px', borderRadius: '8px', fontWeight: 700, fontSize: '12px', cursor: quizGenerating[topic.id] ? 'not-allowed' : 'pointer', fontFamily: 'inherit', boxShadow: quizGenerating[topic.id] ? 'none' : `0 3px 10px ${accent.glow}`, whiteSpace: 'nowrap' }}
                                                     >
                                                         <Zap size={12} />
-                                                        {quizGenerating[topic.id] ? 'Generating…' : topicQuizStatus[topic.id] ? 'Regenerate' : 'Generate Quiz'}
+                                                        {quizGenerating[topic.id] ? 'Generating…' : topicQuizStatus[topic.id]?.tiers?.[(quizSettings[topic.id]?.difficulty || 'Intermediate').toLowerCase()] ? 'Regenerate' : 'Generate Quiz'}
                                                     </button>
                                                 </div>
-                                                {topicQuizStatus[topic.id] && (
-                                                    <div style={{ marginTop: '8px', fontSize: '11px', color: theme.textMuted }}>
-                                                        Current: <strong style={{ color: theme.textSecondary }}>{topicQuizStatus[topic.id].difficulty}</strong> · Bloom: <strong style={{ color: theme.textSecondary }}>{topicQuizStatus[topic.id].bloomLevel}</strong> · <strong style={{ color: theme.textSecondary }}>{topicQuizStatus[topic.id].questionCount || 10}</strong> questions
+                                                {topicQuizStatus[topic.id]?.tiers && (
+                                                    <div style={{ marginTop: '8px', fontSize: '11px', color: theme.textMuted, display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                                                        {[
+                                                            { tier: 'beginner',     label: 'Beginner',     color: '#34d399' },
+                                                            { tier: 'intermediate', label: 'Intermediate', color: '#fbbf24' },
+                                                            { tier: 'advanced',     label: 'Advanced',     color: '#f43f5e' },
+                                                        ].map(({ tier, label, color }) => {
+                                                            const td = topicQuizStatus[topic.id].tiers[tier];
+                                                            if (!td) return null;
+                                                            return (
+                                                                <span key={tier} style={{ color }}>
+                                                                    {label}: <strong>{td.questionCount || 0} Qs</strong>
+                                                                    {td.published ? ' ✓ Published' : ' · Not published'}
+                                                                </span>
+                                                            );
+                                                        })}
                                                     </div>
                                                 )}
                                             </div>
@@ -555,7 +1010,7 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
                                                         onFocus={e => e.target.style.borderBottomColor = accent.from}
                                                         onBlur={e => e.target.style.borderBottomColor = theme.border}
                                                     />
-                                                    {['video', 'article', 'audio'].includes(res.type) && (
+                                                    {['video', 'article', 'audio', 'documentation'].includes(res.type) && (
                                                         <label style={{ cursor: 'pointer', color: theme.textMuted, display: 'flex' }}
                                                             onMouseEnter={e => e.currentTarget.style.color = accent.from}
                                                             onMouseLeave={e => e.currentTarget.style.color = theme.textMuted}
@@ -649,6 +1104,29 @@ const CurriculumBuilder = ({ courseId, initialModules = [], initialSyllabus = {}
                         ...s,
                         [quizEditorOpen.topicId]: { ...s[quizEditorOpen.topicId], questionCount: count },
                     }))}
+                />
+            )}
+
+            {/* Assignment Review Panel */}
+            {assignmentReview && (
+                <AssignmentReviewPanel
+                    assignmentId={assignmentReview.assignmentId}
+                    maxPoints={assignmentReview.maxPoints}
+                    title={assignmentReview.title}
+                    onClose={() => setAssignmentReview(null)}
+                    theme={theme}
+                    accent={accent}
+                />
+            )}
+
+            {/* Class Test Results Modal */}
+            {testResults && (
+                <ClassTestResultsModal
+                    testId={testResults.testId}
+                    testTitle={testResults.testTitle}
+                    onClose={() => setTestResults(null)}
+                    theme={theme}
+                    accent={accent}
                 />
             )}
 

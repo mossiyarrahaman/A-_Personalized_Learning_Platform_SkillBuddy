@@ -71,6 +71,18 @@ const ClassChat = ({ courseId, courseTitle, currentUser, onClose }) => {
         return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
 
+    const formatDateLabel = (iso) => {
+        const d = new Date(iso);
+        const today = new Date();
+        const yesterday = new Date(); yesterday.setDate(today.getDate() - 1);
+        const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+        if (sameDay(d, today)) return 'Today';
+        if (sameDay(d, yesterday)) return 'Yesterday';
+        return d.toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' });
+    };
+
+    const msgDateKey = (iso) => new Date(iso).toDateString();
+
     const isOwn = (msg) => msg.sender?._id?.toString() === currentUser.id?.toString();
 
     return (
@@ -106,11 +118,17 @@ const ClassChat = ({ courseId, courseTitle, currentUser, onClose }) => {
                         No messages yet. Start the conversation!
                     </div>
                 )}
-                {messages.map((msg) => {
+                {messages.map((msg, i) => {
                     const own = isOwn(msg);
                     const isTeacher = msg.sender?.role === 'teacher';
+                    const showDateSep = i === 0 || msgDateKey(msg.createdAt) !== msgDateKey(messages[i - 1].createdAt);
                     return (
                         <div key={msg._id} style={{ display: 'flex', flexDirection: 'column', alignItems: own ? 'flex-end' : 'flex-start' }}>
+                            {showDateSep && (
+                                <div style={{ alignSelf: 'center', margin: '8px 0', padding: '3px 12px', borderRadius: '99px', background: 'rgba(255,255,255,0.06)', border: `1px solid rgba(255,255,255,0.1)`, fontSize: '11px', fontWeight: 600, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.03em' }}>
+                                    {formatDateLabel(msg.createdAt)}
+                                </div>
+                            )}
                             {/* Sender name + badge */}
                             <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '3px' }}>
                                 {!own && (

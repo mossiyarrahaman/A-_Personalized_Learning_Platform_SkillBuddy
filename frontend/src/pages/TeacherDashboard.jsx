@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Menu, Users, BookOpen, BarChart, LogOut, Home, Plus, MessageCircle, MessagesSquare, X, ListChecks, User2, Trash2 } from 'lucide-react';
+import { Menu, Users, BookOpen, BarChart, LogOut, Home, Plus, MessageCircle, MessagesSquare, X, ListChecks, User2, Trash2, Layers } from 'lucide-react';
 import api from '../api/axios';
 import TeacherAnalytics from '../components/TeacherAnalytics';
 import TeacherOverview from '../components/TeacherOverview';
@@ -9,6 +9,7 @@ import CurriculumBuilder from '../components/CurriculumBuilder';
 import DoubtReplyModal from '../components/DoubtReplyModal';
 import ManageStudentsModal from '../components/ManageStudentsModal';
 import ClassChat from '../components/ClassChat';
+import TierQuizManager from '../components/TierQuizManager';
 import { useAppTheme } from '../hooks/useAppTheme';
 
 const TeacherDashboard = ({ user, onLogout }) => {
@@ -28,6 +29,7 @@ const TeacherDashboard = ({ user, onLogout }) => {
     const [managingStudentsCourse, setManagingStudentsCourse] = useState(null);
     const [removingStudent, setRemovingStudent] = useState(null); // {_id, name, enrolledCourseDetails}
     const [chatCourseId, setChatCourseId] = useState(null); // courseId of open chat panel
+    const [tierQuizCourseId, setTierQuizCourseId] = useState(null); // courseId of open tier quiz manager
     const [createFormMsg, setCreateFormMsg] = useState(null);
 
     useEffect(() => { fetchOverviewData(); }, []);
@@ -203,52 +205,71 @@ const TeacherDashboard = ({ user, onLogout }) => {
                     </div>
                 );
 
-            case 'courses':
+            case 'courses': {
+                const tqCourse = courses.find(c => c._id === tierQuizCourseId) || null;
                 return (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '16px' }}>
-                        {courses.map(course => (
-                            <div key={course._id}
-                                style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', overflow: 'hidden', display: 'flex', flexDirection: 'column', transition: 'border-color .2s, box-shadow .2s' }}
-                                onMouseEnter={e => { e.currentTarget.style.borderColor = `${accent.from}50`; e.currentTarget.style.boxShadow = `0 4px 20px ${accent.from}10`; }}
-                                onMouseLeave={e => { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.boxShadow = 'none'; }}
-                            >
-                                <div style={{ height: '3px', background: aGrad }} />
-                                <div style={{ padding: '18px 20px', flex: 1 }}>
-                                    <h3 style={{ fontSize: '15px', fontWeight: 700, color: theme.textPrimary, margin: '0 0 6px', fontFamily: "'Sora', sans-serif" }}>{course.title}</h3>
-                                    <p style={{ fontSize: '12px', color: theme.textMuted, margin: '0 0 14px', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{course.description}</p>
-                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                        <span style={{ fontSize: '11px', fontWeight: 600, color: accent.from, background: `${accent.from}15`, border: `1px solid ${accent.from}30`, borderRadius: '20px', padding: '3px 10px' }}>{course.level}</span>
-                                        <span style={{ fontSize: '11px', color: theme.textMuted }}>{new Date(course.createdAt).toLocaleDateString()}</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 320px))', gap: '16px' }}>
+                            {courses.map(course => (
+                                <div key={course._id}
+                                    style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', overflow: 'hidden', display: 'flex', flexDirection: 'column', transition: 'border-color .2s, box-shadow .2s' }}
+                                    onMouseEnter={e => { e.currentTarget.style.borderColor = `${accent.from}50`; e.currentTarget.style.boxShadow = `0 4px 20px ${accent.from}10`; }}
+                                    onMouseLeave={e => { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.boxShadow = 'none'; }}
+                                >
+                                    <div style={{ height: '3px', background: aGrad }} />
+                                    <div style={{ padding: '18px 20px', flex: 1 }}>
+                                        <h3 style={{ fontSize: '15px', fontWeight: 700, color: theme.textPrimary, margin: '0 0 6px', fontFamily: "'Sora', sans-serif" }}>{course.title}</h3>
+                                        <p style={{ fontSize: '12px', color: theme.textMuted, margin: '0 0 14px', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{course.description}</p>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                            <span style={{ fontSize: '11px', fontWeight: 600, color: accent.from, background: `${accent.from}15`, border: `1px solid ${accent.from}30`, borderRadius: '20px', padding: '3px 10px' }}>{course.level}</span>
+                                            <span style={{ fontSize: '11px', color: theme.textMuted }}>{new Date(course.createdAt).toLocaleDateString()}</span>
+                                        </div>
+                                    </div>
+                                    <div style={{ borderTop: `1px solid ${theme.border}`, padding: '12px 16px', display: 'flex', gap: '8px' }}>
+                                        {[
+                                            { label: 'Curriculum', icon: ListChecks, onClick: () => setEditingCourse(course) },
+                                            { label: 'Students', icon: Users, onClick: () => setManagingStudentsCourse(course) },
+                                            { label: 'Tier Quizzes', icon: Layers, onClick: () => setTierQuizCourseId(tierQuizCourseId === course._id ? null : course._id) },
+                                        ].map(({ label, icon: Icon, onClick }) => {
+                                            const isActive = label === 'Tier Quizzes' && tierQuizCourseId === course._id;
+                                            return (
+                                                <button key={label} onClick={onClick}
+                                                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '8px', borderRadius: '8px', border: `1px solid ${isActive ? accent.from : theme.border}`, background: isActive ? `${accent.from}12` : 'none', color: isActive ? accent.from : theme.textSecondary, cursor: 'pointer', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit', transition: 'all .15s' }}
+                                                    onMouseEnter={e => { if (!isActive) { e.currentTarget.style.borderColor = accent.from; e.currentTarget.style.color = accent.from; e.currentTarget.style.background = `${accent.from}08`; } }}
+                                                    onMouseLeave={e => { if (!isActive) { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.color = theme.textSecondary; e.currentTarget.style.background = 'none'; } }}
+                                                >
+                                                    <Icon size={13} /> {label}
+                                                </button>
+                                            );
+                                        })}
                                     </div>
                                 </div>
-                                <div style={{ borderTop: `1px solid ${theme.border}`, padding: '12px 16px', display: 'flex', gap: '8px' }}>
-                                    {[
-                                        { label: 'Curriculum', icon: ListChecks, onClick: () => setEditingCourse(course) },
-                                        { label: 'Students', icon: Users, onClick: () => setManagingStudentsCourse(course) },
-                                    ].map(({ label, icon: Icon, onClick }) => (
-                                        <button key={label} onClick={onClick}
-                                            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '8px', borderRadius: '8px', border: `1px solid ${theme.border}`, background: 'none', color: theme.textSecondary, cursor: 'pointer', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit', transition: 'all .15s' }}
-                                            onMouseEnter={e => { e.currentTarget.style.borderColor = accent.from; e.currentTarget.style.color = accent.from; e.currentTarget.style.background = `${accent.from}08`; }}
-                                            onMouseLeave={e => { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.color = theme.textSecondary; e.currentTarget.style.background = 'none'; }}
-                                        >
-                                            <Icon size={13} /> {label}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        ))}
+                            ))}
 
-                        {/* Create new card */}
-                        <button onClick={() => setShowCreateModal(true)}
-                            style={{ background: 'none', border: `2px dashed ${theme.border}`, borderRadius: '16px', padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', color: theme.textMuted, cursor: 'pointer', minHeight: '180px', transition: 'all .2s', fontFamily: 'inherit' }}
-                            onMouseEnter={e => { e.currentTarget.style.borderColor = accent.from; e.currentTarget.style.color = accent.from; e.currentTarget.style.background = `${accent.from}06`; }}
-                            onMouseLeave={e => { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.color = theme.textMuted; e.currentTarget.style.background = 'none'; }}
-                        >
-                            <Plus size={28} />
-                            <span style={{ fontSize: '14px', fontWeight: 600 }}>Create New Course</span>
-                        </button>
+                            {/* Create new card */}
+                            <button onClick={() => setShowCreateModal(true)}
+                                style={{ background: 'none', border: `2px dashed ${theme.border}`, borderRadius: '16px', padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', color: theme.textMuted, cursor: 'pointer', minHeight: '180px', transition: 'all .2s', fontFamily: 'inherit' }}
+                                onMouseEnter={e => { e.currentTarget.style.borderColor = accent.from; e.currentTarget.style.color = accent.from; e.currentTarget.style.background = `${accent.from}06`; }}
+                                onMouseLeave={e => { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.color = theme.textMuted; e.currentTarget.style.background = 'none'; }}
+                            >
+                                <Plus size={28} />
+                                <span style={{ fontSize: '14px', fontWeight: 600 }}>Create New Course</span>
+                            </button>
+                        </div>
+
+                        {tqCourse && (
+                            <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '16px', padding: '24px' }}>
+                                <TierQuizManager
+                                    courseId={tierQuizCourseId}
+                                    course={tqCourse}
+                                    theme={theme}
+                                    accent={accent}
+                                />
+                            </div>
+                        )}
                     </div>
                 );
+            }
 
             case 'doubts':
                 return (
@@ -476,7 +497,7 @@ const TeacherDashboard = ({ user, onLogout }) => {
                                 ))}
                                 <button type="submit"
                                     style={{ width: '100%', background: aGrad, border: 'none', color: '#fff', padding: '13px', borderRadius: '10px', fontWeight: 700, fontSize: '14px', cursor: 'pointer', boxShadow: `0 4px 14px ${accent.glow}`, fontFamily: 'inherit', marginTop: '4px' }}
-                                >Create Class</button>
+                                >Create Course</button>
                             </form>
                         </div>
                     </div>

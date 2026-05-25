@@ -10,7 +10,7 @@ import {
 import api from '../api/axios';
 import { useAppTheme } from '../hooks/useAppTheme';
 import QuizModal from '../components/QuizModal';
-import { getLocalResults } from '../utils/quizStorage';
+import { getLocalResults, syncPendingResults } from '../utils/quizStorage';
 
 // ─── Custom tooltip ───────────────────────────────────────────────────────────
 const CTip = ({ active, payload, label, theme }) => {
@@ -69,18 +69,58 @@ const StudentAnalytics = () => {
 
     const loadData = useCallback(async () => {
         try {
-            const [statsRes, coursesRes, dashRes] = await Promise.all([
+            const [statsRes, coursesRes, dashRes, quizStatsRes] = await Promise.all([
                 api.get('/gamification/my-stats').catch(() => ({ data: {} })),
                 api.get('/courses/student/enrolled-classes').catch(() => ({ data: { classes: [] } })),
                 api.get('/courses/dashboard').catch(() => ({ data: { profile: {} } })),
+                api.get('/courses/my-quiz-stats').catch(() => ({ data: { quizzes: [], quizzesTaken: 0, avgScore: 0 } })),
             ]);
 
             const stats = statsRes.data || {};
             const courses = coursesRes.data.classes || [];
             const profile = dashRes.data.profile || {};
 
-            // ── Quiz results: localStorage first (always works) ──
-            const quizResults = getLocalResults();
+            // ── Quiz results: backend (per-student, cross-device) merged with user-scoped localStorage ──
+            const backendQuizzes = quizStatsRes.data?.quizzes || [];
+            const localResults = getLocalResults(); // now user-scoped via namespaced KEY
+
+            // De-duplicate: local entries whose date matches a backend record are already persisted
+            const backendKeys = new Set(backendQuizzes.map(q => {
+                const d = q.attemptDate ? new Date(q.attemptDate).getTime() : 0;
+                return `${q.topicTitle}_${d}`;
+            }));
+            const localOnly = localResults.filter(r => {
+                const d = r.completedAt ? new Date(r.completedAt).getTime() : 0;
+                return !backendKeys.has(`${r.topicTitle}_${d}`);
+            });
+
+            // Normalize both sources into the same shape
+            const allQuizResults = [
+                ...backendQuizzes.map(q => ({
+                    topicTitle: q.topicTitle || 'Quiz',
+                    pct: q.score || 0,
+                    score: q.correctAnswers || 0,
+                    total: q.totalQuestions || 0,
+                    bloomLevel: q.bloomLevel || null,
+                    difficulty: q.difficultyTier
+                        ? (q.difficultyTier === 'beginner' ? 'Easy' : q.difficultyTier === 'intermediate' ? 'Intermediate' : 'Hard')
+                        : 'Intermediate',
+                    mistakes: q.wrongQuestions || [],
+                    completedAt: q.attemptDate ? new Date(q.attemptDate).toISOString() : null,
+                    isTeacherAssessment: q.isTeacherAssessment || false,
+                })),
+                ...localOnly.map(r => ({
+                    topicTitle: r.topicTitle || 'Quiz',
+                    pct: r.pct || 0,
+                    score: r.score || 0,
+                    total: r.total || 0,
+                    bloomLevel: r.bloomLevel || null,
+                    difficulty: r.difficulty || 'Intermediate',
+                    mistakes: r.mistakes || [],
+                    completedAt: r.completedAt || null,
+                    isTeacherAssessment: false,
+                })),
+            ];
 
             // ── Course progress ──
             const courseProgress = courses.map(c => {
@@ -110,14 +150,13 @@ const StudentAnalytics = () => {
                 total: c.modules.reduce((a, m) => a + (m.topics?.length || 0), 0),
             })).filter(x => x.total > 0);
 
-            // ── Quiz scores ──
-            const quizScores = quizResults.map(r => ({
-                topic: r.topicTitle || 'Quiz',
+            // ── Quiz scores (from merged real data) ──
+            const quizScores = allQuizResults.map(r => ({
+                topic: r.topicTitle,
                 score: Math.round(r.pct || 0),
                 correct: r.score || 0,
                 total: r.total || 0,
                 difficulty: r.difficulty || 'Intermediate',
-                timeTaken: r.timeTaken || 0,
                 completedAt: r.completedAt,
                 mistakes: r.mistakes || [],
             }));
@@ -130,17 +169,16 @@ const StudentAnalytics = () => {
             // ── Weekly activity — quizzes per day ──
             const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
             const weeklyQuiz = Array(7).fill(0).map((_, d) => ({ day: dayNames[d], quizzes: 0, avgScore: 0, _scores: [] }));
-            quizResults.forEach(r => {
+            allQuizResults.forEach(r => {
                 if (!r.completedAt) return;
                 const d = new Date(r.completedAt).getDay();
                 weeklyQuiz[d].quizzes++;
                 weeklyQuiz[d]._scores.push(r.pct || 0);
             });
             weeklyQuiz.forEach(d => { d.avgScore = d._scores.length > 0 ? Math.round(d._scores.reduce((a, b) => a + b, 0) / d._scores.length) : 0; delete d._scores; });
-            // Reorder to start from Mon
             const weeklyActivity = [...weeklyQuiz.slice(1), weeklyQuiz[0]];
 
-            // ── Daily study hours (simulated from completedTopics timestamps or profile) ──
+            // ── Daily study hours ──
             const hoursStudied = profile?.stats?.hoursStudied || stats?.hoursStudied || 0;
             const dailyHours = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => ({
                 day, hours: Number((hoursStudied / 7 * (0.5 + Math.random() * 1)).toFixed(1))
@@ -148,30 +186,30 @@ const StudentAnalytics = () => {
 
             // ── Mistake topics ──
             const mistakeMap = {};
-            quizResults.forEach(r => {
+            allQuizResults.forEach(r => {
                 (r.mistakes || []).forEach(m => {
                     const k = m.topic || r.topicTitle || 'General';
                     if (!mistakeMap[k]) mistakeMap[k] = { topic: k, count: 0, examples: [] };
                     mistakeMap[k].count++;
-                    if (mistakeMap[k].examples.length < 3) mistakeMap[k].examples.push(m.question);
+                    if (mistakeMap[k].examples.length < 3) mistakeMap[k].examples.push(m.question || m.questionText);
                 });
             });
             const mistakeTopics = Object.values(mistakeMap).sort((a, b) => b.count - a.count).slice(0, 8);
 
             // ── Difficulty breakdown ──
             const diffMap = { Easy: { count: 0, total: 0 }, Intermediate: { count: 0, total: 0 }, Hard: { count: 0, total: 0 } };
-            quizResults.forEach(r => { const d = r.difficulty || 'Intermediate'; if (diffMap[d]) { diffMap[d].count++; diffMap[d].total += r.pct || 0; } });
+            allQuizResults.forEach(r => { const d = r.difficulty || 'Intermediate'; if (diffMap[d]) { diffMap[d].count++; diffMap[d].total += r.pct || 0; } });
             const diffBreakdown = Object.entries(diffMap).map(([name, v]) => ({ name, avgScore: v.count > 0 ? Math.round(v.total / v.count) : 0, count: v.count }));
 
             // ── Score improvement (first 5 vs recent 5) ──
-            const newestFirst = [...quizScores]; // already newest first
+            const newestFirst = [...quizScores];
             const recentSlice = newestFirst.slice(0, Math.min(5, newestFirst.length));
             const earlierSlice = newestFirst.length > 5 ? newestFirst.slice(-Math.min(5, newestFirst.length - 1)) : [];
             const recentAvg = recentSlice.length ? Math.round(recentSlice.reduce((a, q) => a + q.score, 0) / recentSlice.length) : null;
             const earlierAvg = earlierSlice.length ? Math.round(earlierSlice.reduce((a, q) => a + q.score, 0) / earlierSlice.length) : null;
             const improvementDelta = (recentAvg !== null && earlierAvg !== null) ? recentAvg - earlierAvg : null;
 
-            // ── Topic mastery pie (done vs remaining for AI path) ──
+            // ── Topic mastery pie ──
             const aiTotal = aiModules.reduce((a, m) => a + (m.topics?.length || 0), 0);
             const aiDone = aiModules.reduce((a, m) => a + (m.topics?.filter(t => t.status === 'completed').length || 0), 0);
 
@@ -189,17 +227,24 @@ const StudentAnalytics = () => {
 
     useEffect(() => { loadData(); }, [loadData]);
 
-    // Re-read when quiz results change (storage event from QuizModal)
+    // Sync any quiz results that failed to reach the backend in a previous session
+    useEffect(() => { syncPendingResults(); }, []);
+
+    // Re-read when quiz results change (storage event from QuizModal or cross-tab)
+    // Also refetch when the tab regains focus so stale data is never shown after switching tabs
     useEffect(() => {
         const handler = (e) => {
-            // React to our quiz key OR any storage event
-            if (!e.key || e.key === 'sb_quiz_results') {
+            if (!e.key || e.key.startsWith('sb_quiz_results_')) {
                 console.log('[Analytics] Storage event - reloading data');
                 loadData();
             }
         };
         window.addEventListener('storage', handler);
-        return () => window.removeEventListener('storage', handler);
+        window.addEventListener('focus', loadData);
+        return () => {
+            window.removeEventListener('storage', handler);
+            window.removeEventListener('focus', loadData);
+        };
     }, [loadData]);
 
     if (loading) return (

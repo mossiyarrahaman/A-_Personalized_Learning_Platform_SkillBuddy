@@ -1,7 +1,96 @@
-import { useState, useEffect, useRef } from 'react';
-import { X, Book, BookOpen, CheckCircle, Play, FileText, ExternalLink, Loader, ArrowRight, Link, Headphones, Video, Eye, Download, Brain, RefreshCw, AlertCircle, ChevronRight, XCircle, Target, Clock, Zap, ChevronDown, ChevronUp, Lightbulb, Code, List, AlertTriangle } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { X, Book, BookOpen, CheckCircle, Play, FileText, ExternalLink, Loader, ArrowRight, Link, Headphones, Video, Eye, Download, Brain, RefreshCw, AlertCircle, ChevronRight, XCircle, Target, Clock, Zap, ChevronDown, ChevronUp, Lightbulb, Code, List, AlertTriangle, ClipboardList, Timer, Upload, Send } from 'lucide-react';
 import api from '../api/axios';
 import { useAppTheme } from '../hooks/useAppTheme';
+import TierQuizPanel from './TierQuizPanel';
+
+// Theme-aware markdown renderer. Handles: ## h2, ### h3, > blockquote, ``` code blocks,
+// **bold**, `inline code`, - bullet lists, 1. ordered lists.
+// Also normalises content stored with literal \n escape sequences.
+function renderTopicContent(content, theme) {
+    if (!content) return null;
+    const lines = content.replace(/\\n/g, '\n').split('\n');
+    const els = [];
+    let i = 0;
+
+    const inlineFmt = (text) => {
+        const parts = [];
+        const re = /(\*\*[^*\n]+\*\*|`[^`\n]+`)/g;
+        let last = 0, m;
+        while ((m = re.exec(text)) !== null) {
+            if (m.index > last) parts.push(text.slice(last, m.index));
+            const tok = m[0];
+            if (tok.startsWith('**')) {
+                parts.push(<strong key={m.index} style={{ color: theme.textPrimary, fontWeight: 600 }}>{tok.slice(2, -2)}</strong>);
+            } else {
+                parts.push(<code key={m.index} style={{ background: theme.bg, color: '#86efac', padding: '1px 6px', borderRadius: 4, fontSize: '0.8em', fontFamily: 'monospace' }}>{tok.slice(1, -1)}</code>);
+            }
+            last = m.index + tok.length;
+        }
+        if (last < text.length) parts.push(text.slice(last));
+        return parts.length > 0 ? parts : text;
+    };
+
+    while (i < lines.length) {
+        const line = lines[i];
+        const t = line.trim();
+
+        if (t.startsWith('```')) {
+            const codeLines = [];
+            i++;
+            while (i < lines.length && !lines[i].trim().startsWith('```')) { codeLines.push(lines[i]); i++; }
+            i++;
+            els.push(
+                <pre key={els.length} style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: '12px 16px', margin: '12px 0', overflowX: 'auto' }}>
+                    <code style={{ color: '#86efac', fontSize: '0.8em', fontFamily: 'monospace', lineHeight: 1.6 }}>{codeLines.join('\n')}</code>
+                </pre>
+            );
+            continue;
+        }
+        if (/^## /.test(t)) {
+            els.push(<h2 key={els.length} style={{ color: theme.textPrimary, fontWeight: 700, fontSize: '1.1em', marginTop: 24, marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${theme.border}` }}>{inlineFmt(t.slice(3))}</h2>);
+            i++; continue;
+        }
+        if (/^### /.test(t)) {
+            els.push(<h3 key={els.length} style={{ color: theme.textPrimary, fontWeight: 600, fontSize: '0.95em', marginTop: 16, marginBottom: 6 }}>{inlineFmt(t.slice(4))}</h3>);
+            i++; continue;
+        }
+        if (t.startsWith('> ')) {
+            const qLines = [];
+            while (i < lines.length && lines[i].trim().startsWith('> ')) { qLines.push(lines[i].trim().slice(2)); i++; }
+            els.push(
+                <blockquote key={els.length} style={{ borderLeft: '3px solid #a855f7', background: 'rgba(168,85,247,0.08)', paddingLeft: 12, paddingRight: 10, paddingTop: 6, paddingBottom: 6, margin: '10px 0', borderRadius: '0 6px 6px 0' }}>
+                    {qLines.map((ql, qi) => <p key={qi} style={{ color: theme.textSecondary, fontSize: '0.875em', lineHeight: 1.6, margin: 0 }}>{inlineFmt(ql)}</p>)}
+                </blockquote>
+            );
+            continue;
+        }
+        if (/^[-•] /.test(t)) {
+            const items = [];
+            while (i < lines.length && /^[-•] /.test(lines[i].trim())) { items.push(lines[i].trim().replace(/^[-•] /, '')); i++; }
+            els.push(
+                <ul key={els.length} style={{ paddingLeft: 20, margin: '8px 0' }}>
+                    {items.map((it, ii) => <li key={ii} style={{ color: theme.textSecondary, fontSize: '0.875em', lineHeight: 1.7, listStyleType: 'disc' }}>{inlineFmt(it)}</li>)}
+                </ul>
+            );
+            continue;
+        }
+        if (/^\d+\. /.test(t)) {
+            const items = [];
+            while (i < lines.length && /^\d+\. /.test(lines[i].trim())) { items.push(lines[i].trim().replace(/^\d+\. /, '')); i++; }
+            els.push(
+                <ol key={els.length} style={{ paddingLeft: 20, margin: '8px 0' }}>
+                    {items.map((it, ii) => <li key={ii} style={{ color: theme.textSecondary, fontSize: '0.875em', lineHeight: 1.7, listStyleType: 'decimal' }}>{inlineFmt(it)}</li>)}
+                </ol>
+            );
+            continue;
+        }
+        if (t.length === 0) { i++; continue; }
+        els.push(<p key={els.length} style={{ color: theme.textSecondary, fontSize: '0.875em', lineHeight: 1.7, marginBottom: 8 }}>{inlineFmt(t)}</p>);
+        i++;
+    }
+    return els;
+}
 
 const BLOOMS_LEVELS = [
     { id: 'remember', label: 'Remembering', description: 'Recall facts and basic concepts' },
@@ -296,8 +385,41 @@ const TopicDetailModal = ({ courseId, moduleId, topicId, pathId, onClose, onUpda
     const [showHint, setShowHint] = useState(false);
     const [quizError, setQuizError] = useState(null);
 
+    // Assignments state
+    const [assignments, setAssignments] = useState([]);
+    const [submissionMap, setSubmissionMap] = useState({});
+    const [expandedAssignment, setExpandedAssignment] = useState(null);
+    const [subDraft, setSubDraft] = useState({});
+    const [submitting, setSubmitting] = useState({});
+    const [uploadingSubFile, setUploadingSubFile] = useState({});
+
+    // Class tests state
+    const [classTests, setClassTests] = useState([]);
+    const [activeTest, setActiveTest] = useState(null);
+    const [testAnswers, setTestAnswers] = useState({});
+    const testAnswersRef = useRef({});
+    const [testTimeLeft, setTestTimeLeft] = useState(0);
+    const [testSubmitting, setTestSubmitting] = useState(false);
+    const [testResult, setTestResult] = useState(null);
+    const submittingTestRef = useRef(false);
 
     const isAiPath = !courseId || courseId === 'undefined';
+
+    // Tier quiz state (teacher courses only)
+    const [tierAvailability, setTierAvailability] = useState(null); // byTopic map from topic-quizzes endpoint
+    const [tierScores, setTierScores] = useState({});               // byTopic map from my-tier-scores endpoint
+
+    const fetchTierData = useCallback(async () => {
+        if (isAiPath || !courseId) return;
+        try {
+            const [quizzesRes, scoresRes] = await Promise.allSettled([
+                api.get(`/rag/topic-quizzes/${courseId}`),
+                api.get(`/courses/${courseId}/my-tier-scores`),
+            ]);
+            if (quizzesRes.status === 'fulfilled') setTierAvailability(quizzesRes.value.data.quizzes || {});
+            if (scoresRes.status === 'fulfilled') setTierScores(scoresRes.value.data.byTopic || {});
+        } catch { /* non-fatal */ }
+    }, [courseId, isAiPath]);
 
     const handlePreview = (resource) => {
         setPreviewFile({ url: resource.url, name: resource.title, type: resource.type });
@@ -391,11 +513,29 @@ const TopicDetailModal = ({ courseId, moduleId, topicId, pathId, onClose, onUpda
         }
     };
 
+    // ── Class Test Timer ────────────────────────────────────────────────────
+    useEffect(() => {
+        if (!activeTest || testResult) return;
+        if (testTimeLeft <= 0) {
+            if (submittingTestRef.current) return;
+            submittingTestRef.current = true;
+            const answers = activeTest.questions.map((q, i) => ({
+                questionIndex: i, selectedLabel: testAnswersRef.current[i] || null,
+            }));
+            api.post(`/class-tests/${activeTest._id}/submit`, { answers })
+                .then(res => setTestResult({ score: res.data.score, passed: res.data.passed, correctCount: res.data.correctCount, totalQuestions: res.data.totalQuestions }))
+                .catch(() => {});
+            return;
+        }
+        const timer = setTimeout(() => setTestTimeLeft(t => t - 1), 1000);
+        return () => clearTimeout(timer);
+    }, [activeTest, testTimeLeft, testResult]);
+
     // ── Data Fetching ──────────────────────────────────────────────────────
     useEffect(() => {
         if (moduleId && topicId) {
             fetchTopicDetails();
-            if (!isAiPath) fetchAnalytics();
+            if (!isAiPath) { fetchAnalytics(); fetchTierData(); fetchAssignmentsAndTests(); }
         }
     }, [courseId, moduleId, topicId]);
 
@@ -420,6 +560,27 @@ const TopicDetailModal = ({ courseId, moduleId, topicId, pathId, onClose, onUpda
             setAnalytics(res.data.analytics);
         } catch { }
     };
+
+    const fetchAssignmentsAndTests = useCallback(async () => {
+        if (isAiPath || !courseId || !topicId) return;
+        try {
+            const [aRes, tRes] = await Promise.allSettled([
+                api.get(`/assignments/topic/${courseId}/${topicId}`),
+                api.get(`/class-tests/topic/${courseId}/${topicId}`),
+            ]);
+            if (aRes.status === 'fulfilled') {
+                const list = aRes.value.data.assignments || [];
+                setAssignments(list);
+                const smap = {};
+                list.forEach(a => { if (a.mySubmission) smap[a._id] = a.mySubmission; });
+                setSubmissionMap(smap);
+            }
+            if (tRes.status === 'fulfilled') {
+                const tests = (tRes.value.data.tests || []).filter(t => t.isPublished);
+                setClassTests(tests);
+            }
+        } catch { /* non-fatal */ }
+    }, [courseId, topicId, isAiPath]);
 
     const toggleResource = async (resourceId, currentStatus) => {
         const newStatus = !currentStatus;
@@ -618,18 +779,35 @@ const TopicDetailModal = ({ courseId, moduleId, topicId, pathId, onClose, onUpda
 
                         {/* Sidebar footer: quiz + google */}
                         <div className="p-5 space-y-3 flex-shrink-0" style={{ borderTop: `1px solid ${theme.border}` }}>
-                            <button
-                                onClick={startQuizFlow}
-                                disabled={!canTakeQuiz}
-                                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all"
-                                style={canTakeQuiz
-                                    ? { background: aGrad, color: '#fff', border: 'none', cursor: 'pointer', boxShadow: `0 4px 16px ${accent.from}30` }
-                                    : { background: theme.bg, color: theme.textMuted, border: `1px solid ${theme.border}`, cursor: 'not-allowed' }
-                                }
-                            >
-                                <Brain size={16} />
-                                {topic?.status === 'completed' ? 'Retake Quiz' : canTakeQuiz ? 'Take Quiz' : 'Complete steps to unlock'}
-                            </button>
+                            {/* Tier Quiz Panel — shown for teacher courses with tier quizzes */}
+                            {!isAiPath && tierAvailability && topicId && tierAvailability[topicId]?.tiers
+                                && Object.values(tierAvailability[topicId].tiers).some(t => t?.questionCount > 0)
+                                ? (
+                                    <TierQuizPanel
+                                        courseId={courseId}
+                                        moduleId={moduleId}
+                                        topicId={topicId}
+                                        topicTitle={topic?.title || ''}
+                                        tierAvailability={tierAvailability[topicId]?.tiers || {}}
+                                        topicScores={tierScores[topicId] || []}
+                                        onScoresRefresh={fetchTierData}
+                                        theme={theme}
+                                    />
+                                ) : (
+                                    <button
+                                        onClick={startQuizFlow}
+                                        disabled={!canTakeQuiz}
+                                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all"
+                                        style={canTakeQuiz
+                                            ? { background: aGrad, color: '#fff', border: 'none', cursor: 'pointer', boxShadow: `0 4px 16px ${accent.from}30` }
+                                            : { background: theme.bg, color: theme.textMuted, border: `1px solid ${theme.border}`, cursor: 'not-allowed' }
+                                        }
+                                    >
+                                        <Brain size={16} />
+                                        {topic?.status === 'completed' ? 'Retake Quiz' : canTakeQuiz ? 'Take Quiz' : 'Complete steps to unlock'}
+                                    </button>
+                                )
+                            }
 
                             <a
                                 href={`https://google.com/search?q=${encodeURIComponent((topic?.title || '') + ' tutorial')}`}
@@ -682,14 +860,7 @@ const TopicDetailModal = ({ courseId, moduleId, topicId, pathId, onClose, onUpda
                             {/* ── AI PATH: fallback content ── */}
                             {isAiPath && (!topic?.plan?.steps || topic.plan.steps.length === 0) && topic?.content && (
                                 <div className="rounded-xl p-6" style={{ background: theme.surface, border: `1px solid ${theme.border}` }}>
-                                    <div className="space-y-2">
-                                        {topic.content.split('\n').map((line, i) => {
-                                            if (line.trim().startsWith('###')) return <h4 key={i} className="text-base font-bold mt-5 mb-2 pb-2" style={{ color: theme.textPrimary, borderBottom: `1px solid ${theme.border}` }}>{line.replace(/###/g, '').trim()}</h4>;
-                                            if (line.trim().startsWith('**')) return <strong key={i} className="block mt-3 mb-1" style={{ color: theme.textPrimary }}>{line.replace(/\*\*/g, '')}</strong>;
-                                            if (line.trim().length === 0) return <br key={i} />;
-                                            return <p key={i} className="mb-2 leading-relaxed text-sm" style={{ color: theme.textSecondary }}>{line.replace(/\*\*/g, '')}</p>;
-                                        })}
-                                    </div>
+                                    {renderTopicContent(topic.content, theme)}
                                 </div>
                             )}
 
@@ -698,14 +869,7 @@ const TopicDetailModal = ({ courseId, moduleId, topicId, pathId, onClose, onUpda
                                 <div>
                                     {topic?.content && (
                                         <div className="rounded-xl p-6 mb-8" style={{ background: theme.surface, border: `1px solid ${theme.border}` }}>
-                                            <div className="space-y-2">
-                                                {topic.content.split('\n').map((line, i) => {
-                                                    if (line.trim().startsWith('###')) return <h4 key={i} className="text-base font-bold mt-5 mb-2 pb-2" style={{ color: theme.textPrimary, borderBottom: `1px solid ${theme.border}` }}>{line.replace(/###/g, '').trim()}</h4>;
-                                                    if (line.trim().startsWith('**')) return <strong key={i} className="block mt-3 mb-1" style={{ color: theme.textPrimary }}>{line.replace(/\*\*/g, '')}</strong>;
-                                                    if (line.trim().length === 0) return <br key={i} />;
-                                                    return <p key={i} className="mb-2 leading-relaxed text-sm" style={{ color: theme.textSecondary }}>{line.replace(/\*\*/g, '')}</p>;
-                                                })}
-                                            </div>
+                                            {renderTopicContent(topic.content, theme)}
                                         </div>
                                     )}
                                     <div className="flex items-center gap-2.5 mb-5">
@@ -775,6 +939,177 @@ const TopicDetailModal = ({ courseId, moduleId, topicId, pathId, onClose, onUpda
                                         )}
                                     </div>
                                     <AnalyticsSection />
+
+                                    {/* ── ASSIGNMENTS SECTION ── */}
+                                    {assignments.length > 0 && (
+                                        <div style={{ marginTop: '32px' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+                                                <ClipboardList size={16} style={{ color: '#fbbf24' }} />
+                                                <h2 style={{ fontSize: '15px', fontWeight: 700, color: theme.textPrimary, margin: 0, fontFamily: "'Sora', sans-serif" }}>Assignments</h2>
+                                            </div>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                                {assignments.map(a => {
+                                                    const sub = submissionMap[a._id];
+                                                    const isDue = a.dueDate && new Date(a.dueDate) < new Date();
+                                                    const canSubmit = !isDue && sub?.status !== 'returned';
+                                                    const isExp = expandedAssignment === a._id;
+                                                    return (
+                                                        <div key={a._id} style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', overflow: 'hidden' }}>
+                                                            <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }} onClick={() => setExpandedAssignment(isExp ? null : a._id)}>
+                                                                <ClipboardList size={15} style={{ color: '#fbbf24', flexShrink: 0 }} />
+                                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                                    <div style={{ fontSize: '14px', fontWeight: 700, color: theme.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.title}</div>
+                                                                    <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>
+                                                                        {a.dueDate ? `Due ${new Date(a.dueDate).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}` : 'No due date'} · {a.maxPoints} pts
+                                                                    </div>
+                                                                </div>
+                                                                {sub?.status === 'returned' && <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 9px', borderRadius: '20px', background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)', flexShrink: 0 }}>{sub.grade}/{a.maxPoints} pts</span>}
+                                                                {sub?.status === 'submitted' && <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 9px', borderRadius: '20px', background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)', flexShrink: 0 }}>Submitted</span>}
+                                                                {isDue && !sub && <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 9px', borderRadius: '20px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', flexShrink: 0 }}>Past Due</span>}
+                                                                {isExp ? <ChevronUp size={15} style={{ color: theme.textMuted, flexShrink: 0 }} /> : <ChevronDown size={15} style={{ color: theme.textMuted, flexShrink: 0 }} />}
+                                                            </div>
+                                                            {isExp && (
+                                                                <div style={{ padding: '0 16px 16px', borderTop: `1px solid ${theme.border}` }}>
+                                                                    {a.instructions && (
+                                                                        <div style={{ padding: '12px', background: theme.bg, borderRadius: '8px', fontSize: '13px', color: theme.textSecondary, whiteSpace: 'pre-wrap', lineHeight: 1.6, margin: '12px 0', border: `1px solid ${theme.border}` }}>
+                                                                            {a.instructions}
+                                                                        </div>
+                                                                    )}
+                                                                    {a.attachments?.length > 0 && (
+                                                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
+                                                                            {a.attachments.map((f, i) => (
+                                                                                <a key={i} href={f.fileUrl} download target="_blank" rel="noreferrer"
+                                                                                    style={{ display: 'flex', alignItems: 'center', gap: '5px', background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '20px', padding: '4px 10px', fontSize: '11px', color: theme.textSecondary, textDecoration: 'none' }}>
+                                                                                    <FileText size={11} /> {f.fileName} <Download size={10} />
+                                                                                </a>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                    {sub?.status === 'returned' && (
+                                                                        <div style={{ padding: '12px', background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: '8px', marginBottom: '12px' }}>
+                                                                            <div style={{ fontSize: '13px', fontWeight: 700, color: '#22c55e', marginBottom: '4px' }}>Grade: {sub.grade}/{a.maxPoints} pts</div>
+                                                                            {sub.feedback && <div style={{ fontSize: '13px', color: theme.textSecondary, whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{sub.feedback}</div>}
+                                                                        </div>
+                                                                    )}
+                                                                    {sub?.textResponse && sub.status !== 'returned' && (
+                                                                        <div style={{ padding: '10px 12px', background: theme.bg, borderRadius: '8px', fontSize: '13px', color: theme.textSecondary, whiteSpace: 'pre-wrap', lineHeight: 1.55, marginBottom: '12px', border: `1px solid ${theme.border}` }}>
+                                                                            {sub.textResponse}
+                                                                        </div>
+                                                                    )}
+                                                                    {canSubmit && (
+                                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                                            <textarea
+                                                                                value={subDraft[a._id]?.text ?? sub?.textResponse ?? ''}
+                                                                                onChange={e => setSubDraft(d => ({ ...d, [a._id]: { ...d[a._id], text: e.target.value } }))}
+                                                                                rows={4}
+                                                                                placeholder="Type your answer here…"
+                                                                                style={{ width: '100%', background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '10px 12px', fontSize: '13px', color: theme.textPrimary, outline: 'none', fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box' }}
+                                                                            />
+                                                                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                                                                <label style={{ display: 'flex', alignItems: 'center', gap: '5px', background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '20px', padding: '5px 12px', fontSize: '11px', color: theme.textSecondary, cursor: 'pointer' }}>
+                                                                                    <Upload size={11} />
+                                                                                    {uploadingSubFile[a._id] ? 'Uploading…' : 'Attach File'}
+                                                                                    <input type="file" style={{ display: 'none' }} disabled={!!uploadingSubFile[a._id]} onChange={async e => {
+                                                                                        const file = e.target.files?.[0]; if (!file) return;
+                                                                                        setUploadingSubFile(u => ({ ...u, [a._id]: true }));
+                                                                                        try {
+                                                                                            const fd = new FormData(); fd.append('file', file);
+                                                                                            const res = await api.post('/upload', fd);
+                                                                                            setSubDraft(d => ({ ...d, [a._id]: { ...d[a._id], files: [...(d[a._id]?.files || []), { fileName: file.name, fileUrl: res.data.fileUrl }] } }));
+                                                                                        } catch { alert('File upload failed'); }
+                                                                                        finally { setUploadingSubFile(u => ({ ...u, [a._id]: false })); }
+                                                                                    }} />
+                                                                                </label>
+                                                                                {(subDraft[a._id]?.files || []).map((f, i) => (
+                                                                                    <span key={i} style={{ fontSize: '11px', color: theme.textMuted, background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: '20px', padding: '3px 9px' }}>{f.fileName}</span>
+                                                                                ))}
+                                                                                <button
+                                                                                    onClick={async () => {
+                                                                                        setSubmitting(s => ({ ...s, [a._id]: true }));
+                                                                                        try {
+                                                                                            const draft = subDraft[a._id] || {};
+                                                                                            const res = await api.post(`/assignments/${a._id}/submit`, { textResponse: draft.text || '', files: draft.files || [] });
+                                                                                            setSubmissionMap(m => ({ ...m, [a._id]: res.data.submission }));
+                                                                                            setSubDraft(d => { const n = { ...d }; delete n[a._id]; return n; });
+                                                                                        } catch (err) { alert(err.response?.data?.error || 'Submission failed'); }
+                                                                                        finally { setSubmitting(s => ({ ...s, [a._id]: false })); }
+                                                                                    }}
+                                                                                    disabled={submitting[a._id] || uploadingSubFile[a._id]}
+                                                                                    style={{ display: 'flex', alignItems: 'center', gap: '5px', background: aGrad, border: 'none', borderRadius: '8px', padding: '7px 16px', fontSize: '12px', color: '#fff', fontWeight: 700, cursor: submitting[a._id] ? 'not-allowed' : 'pointer', opacity: submitting[a._id] ? 0.6 : 1, marginLeft: 'auto', fontFamily: 'inherit' }}
+                                                                                >
+                                                                                    <Send size={13} />
+                                                                                    {submitting[a._id] ? 'Submitting…' : sub?.status === 'submitted' ? 'Update' : 'Submit'}
+                                                                                </button>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* ── CLASS TESTS SECTION ── */}
+                                    {classTests.length > 0 && (
+                                        <div style={{ marginTop: '32px' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+                                                <Timer size={16} style={{ color: '#6366f1' }} />
+                                                <h2 style={{ fontSize: '15px', fontWeight: 700, color: theme.textPrimary, margin: 0, fontFamily: "'Sora', sans-serif" }}>Class Tests</h2>
+                                            </div>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                                {classTests.map(t => {
+                                                    const now = new Date();
+                                                    const open = t.openAt ? new Date(t.openAt) : null;
+                                                    const close = t.closeAt ? new Date(t.closeAt) : null;
+                                                    const isOpen = open && close && now >= open && now <= close;
+                                                    const isUpcoming = open && now < open;
+                                                    const isClosed = close && now > close;
+
+                                                    let statusChip;
+                                                    if (isClosed) statusChip = { label: 'Closed', bg: 'rgba(255,255,255,0.06)', color: theme.textMuted, border: theme.border };
+                                                    else if (isOpen) statusChip = { label: 'Open Now', bg: 'rgba(99,102,241,0.12)', color: '#6366f1', border: 'rgba(99,102,241,0.3)' };
+                                                    else if (isUpcoming) statusChip = { label: 'Upcoming', bg: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: 'rgba(251,191,36,0.3)' };
+                                                    else statusChip = { label: 'Scheduled', bg: 'rgba(255,255,255,0.06)', color: theme.textMuted, border: theme.border };
+
+                                                    return (
+                                                        <div key={t._id} style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                                            <Timer size={15} style={{ color: '#6366f1', flexShrink: 0 }} />
+                                                            <div style={{ flex: 1, minWidth: '120px' }}>
+                                                                <div style={{ fontSize: '14px', fontWeight: 700, color: theme.textPrimary }}>{t.title}</div>
+                                                                <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                                                    <span>{t.timeLimitMinutes} min</span>
+                                                                    {t.questions?.length > 0 && <span>· {t.questions.length} questions</span>}
+                                                                    {open && <span>· Opens {open.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</span>}
+                                                                </div>
+                                                            </div>
+                                                            <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 9px', borderRadius: '20px', background: statusChip.bg, color: statusChip.color, border: `1px solid ${statusChip.border}`, flexShrink: 0 }}>{statusChip.label}</span>
+                                                            {isOpen && (
+                                                                <button
+                                                                    onClick={async () => {
+                                                                        try {
+                                                                            const res = await api.post(`/class-tests/${t._id}/start`);
+                                                                            testAnswersRef.current = {};
+                                                                            setTestAnswers({});
+                                                                            setTestTimeLeft(t.timeLimitMinutes * 60);
+                                                                            setTestResult(null);
+                                                                            submittingTestRef.current = false;
+                                                                            setActiveTest({ ...t, questions: res.data.questions, attemptId: res.data.attemptId });
+                                                                        } catch (err) { alert(err.response?.data?.error || 'Failed to start test'); }
+                                                                    }}
+                                                                    style={{ background: 'rgba(99,102,241,0.85)', border: 'none', borderRadius: '8px', padding: '7px 14px', fontSize: '12px', color: '#fff', fontWeight: 700, cursor: 'pointer', flexShrink: 0, fontFamily: 'inherit' }}
+                                                                >
+                                                                    Start Test
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
@@ -1053,6 +1388,103 @@ const TopicDetailModal = ({ courseId, moduleId, topicId, pathId, onClose, onUpda
                                         {currentQuestionIndex < quizData.length - 1 ? 'Next Question' : 'See Results'} <ChevronRight size={16} />
                                     </button>
                                 )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* ── CLASS TEST OVERLAY ────────────────────────────────────────────── */}
+            {activeTest && (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(0,0,0,0.97)', display: 'flex', flexDirection: 'column', fontFamily: "'DM Sans', sans-serif" }}>
+                    {/* Header */}
+                    <div style={{ background: theme.surface, borderBottom: `1px solid ${theme.border}`, padding: '14px 24px', display: 'flex', alignItems: 'center', gap: '16px', flexShrink: 0 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            <h2 style={{ fontSize: '16px', fontWeight: 800, color: theme.textPrimary, margin: 0, fontFamily: "'Sora', sans-serif", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeTest.title}</h2>
+                            {!testResult && (
+                                <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
+                                    {Object.keys(testAnswers).length}/{activeTest.questions.length} answered
+                                </div>
+                            )}
+                        </div>
+                        {!testResult && (
+                            <div style={{ fontSize: '22px', fontWeight: 800, color: testTimeLeft < 300 ? '#ef4444' : '#22c55e', fontFamily: "'Sora', sans-serif", minWidth: '80px', textAlign: 'right', transition: 'color .5s' }}>
+                                {Math.floor(testTimeLeft / 60)}:{String(testTimeLeft % 60).padStart(2, '0')}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Body */}
+                    <div style={{ flex: 1, overflowY: 'auto', padding: '32px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                        {testResult ? (
+                            <div style={{ maxWidth: '480px', width: '100%', textAlign: 'center', paddingTop: '40px' }}>
+                                <div style={{ fontSize: '64px', marginBottom: '16px' }}>{testResult.passed ? '🎉' : '😔'}</div>
+                                <h2 style={{ fontSize: '28px', fontWeight: 800, color: theme.textPrimary, marginBottom: '8px', fontFamily: "'Sora', sans-serif" }}>{testResult.score}%</h2>
+                                <p style={{ fontSize: '16px', fontWeight: 700, color: testResult.passed ? '#22c55e' : '#ef4444', marginBottom: '12px' }}>
+                                    {testResult.passed ? 'You Passed!' : 'Not Passed'}
+                                </p>
+                                <p style={{ color: theme.textMuted, marginBottom: '32px' }}>{testResult.correctCount}/{testResult.totalQuestions} correct</p>
+                                <button
+                                    onClick={() => { setActiveTest(null); setTestResult(null); fetchAssignmentsAndTests(); }}
+                                    style={{ background: aGrad, border: 'none', borderRadius: '12px', padding: '14px 40px', fontSize: '15px', color: '#fff', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}
+                                >
+                                    Done
+                                </button>
+                            </div>
+                        ) : (
+                            <div style={{ maxWidth: '660px', width: '100%' }}>
+                                {activeTest.instructions && (
+                                    <div style={{ padding: '12px 16px', background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '10px', fontSize: '13px', color: theme.textSecondary, marginBottom: '24px', lineHeight: 1.6 }}>
+                                        {activeTest.instructions}
+                                    </div>
+                                )}
+                                {activeTest.questions.map((q, qIdx) => (
+                                    <div key={qIdx} style={{ marginBottom: '24px', background: theme.surface, borderRadius: '14px', padding: '20px 24px', border: `1px solid ${theme.border}` }}>
+                                        <div style={{ fontSize: '11px', fontWeight: 700, color: theme.textMuted, marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Question {qIdx + 1}</div>
+                                        <div style={{ fontSize: '15px', fontWeight: 600, color: theme.textPrimary, lineHeight: 1.55, marginBottom: '16px' }}>{q.questionText}</div>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                            {q.options.map(opt => (
+                                                <button
+                                                    key={opt.label}
+                                                    onClick={() => {
+                                                        testAnswersRef.current = { ...testAnswersRef.current, [qIdx]: opt.label };
+                                                        setTestAnswers({ ...testAnswersRef.current });
+                                                    }}
+                                                    style={{
+                                                        textAlign: 'left', padding: '11px 15px', borderRadius: '9px', cursor: 'pointer', fontFamily: 'inherit', fontSize: '13px', fontWeight: 500,
+                                                        background: testAnswers[qIdx] === opt.label ? `${accent.from}18` : theme.bg,
+                                                        border: `1px solid ${testAnswers[qIdx] === opt.label ? accent.from : theme.border}`,
+                                                        color: testAnswers[qIdx] === opt.label ? accent.from : theme.textSecondary,
+                                                        transition: 'all .12s',
+                                                    }}
+                                                >
+                                                    <span style={{ fontWeight: 700, marginRight: '8px' }}>{opt.label}.</span>{opt.text}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                                <button
+                                    onClick={async () => {
+                                        if (submittingTestRef.current) return;
+                                        submittingTestRef.current = true;
+                                        setTestSubmitting(true);
+                                        try {
+                                            const answers = activeTest.questions.map((q, i) => ({
+                                                questionIndex: i, selectedLabel: testAnswersRef.current[i] || null,
+                                            }));
+                                            const res = await api.post(`/class-tests/${activeTest._id}/submit`, { answers });
+                                            setTestResult({ score: res.data.score, passed: res.data.passed, correctCount: res.data.correctCount, totalQuestions: res.data.totalQuestions });
+                                        } catch (err) {
+                                            alert(err.response?.data?.error || 'Submission failed');
+                                            submittingTestRef.current = false;
+                                        } finally { setTestSubmitting(false); }
+                                    }}
+                                    disabled={testSubmitting}
+                                    style={{ width: '100%', background: aGrad, border: 'none', borderRadius: '12px', padding: '14px', fontSize: '15px', color: '#fff', fontWeight: 700, cursor: testSubmitting ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: testSubmitting ? 0.7 : 1, marginTop: '8px' }}
+                                >
+                                    {testSubmitting ? 'Submitting…' : 'Submit Test'}
+                                </button>
                             </div>
                         )}
                     </div>

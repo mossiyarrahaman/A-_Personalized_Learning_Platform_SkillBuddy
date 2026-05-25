@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
     ComposedChart, Area, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
     PieChart, Pie, Cell,
@@ -91,7 +91,6 @@ function EngagementTooltip({ active, payload, label, theme }) {
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function TeacherOverview({ courses }) {
     const { theme, accent } = useAppTheme();
-    const aGrad = `linear-gradient(135deg,${accent.from},${accent.to})`;
 
     const [selectedCourseId, setSelectedCourseId] = useState(courses?.[0]?._id || '');
     const [overview, setOverview] = useState(null);
@@ -99,6 +98,13 @@ export default function TeacherOverview({ courses }) {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [tick, setTick] = useState(0);
+
+    // Sync selectedCourseId when courses arrive asynchronously (race condition fix)
+    useEffect(() => {
+        if (!selectedCourseId && courses?.[0]?._id) {
+            setSelectedCourseId(courses[0]._id);
+        }
+    }, [courses, selectedCourseId]);
 
     const fetchData = useCallback(() => {
         if (!selectedCourseId) return;
@@ -117,6 +123,12 @@ export default function TeacherOverview({ courses }) {
     }, [selectedCourseId, tick]);
 
     useEffect(() => { fetchData(); }, [fetchData]);
+
+    // Refetch when the tab regains focus so teachers always see current student data
+    useEffect(() => {
+        window.addEventListener('focus', fetchData);
+        return () => window.removeEventListener('focus', fetchData);
+    }, [fetchData]);
 
     // ── Derived data ──────────────────────────────────────────────────────────
     const engagementData = (overview?.engagementTrend || []).map(d => ({
@@ -290,20 +302,18 @@ export default function TeacherOverview({ courses }) {
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 20px 0' }}>
                         <div style={{ position: 'relative', width: '180px', height: '180px' }}>
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie
-                                        data={pieData.length > 0 ? pieData : [{ name: 'No data', value: 1, color: theme.border }]}
-                                        cx="50%" cy="50%"
-                                        innerRadius={54} outerRadius={80}
-                                        dataKey="value" stroke="none" paddingAngle={pieData.length > 1 ? 2 : 0}
-                                    >
-                                        {(pieData.length > 0 ? pieData : [{ color: theme.border }]).map((entry, i) => (
-                                            <Cell key={i} fill={entry.color} />
-                                        ))}
-                                    </Pie>
-                                </PieChart>
-                            </ResponsiveContainer>
+                            <PieChart width={180} height={180}>
+                                <Pie
+                                    data={pieData.length > 0 ? pieData : [{ name: 'No data', value: 1, color: theme.border }]}
+                                    cx="50%" cy="50%"
+                                    innerRadius={54} outerRadius={80}
+                                    dataKey="value" stroke="none" paddingAngle={pieData.length > 1 ? 2 : 0}
+                                >
+                                    {(pieData.length > 0 ? pieData : [{ color: theme.border }]).map((entry, i) => (
+                                        <Cell key={i} fill={entry.color} />
+                                    ))}
+                                </Pie>
+                            </PieChart>
                             {/* center label */}
                             <div style={{
                                 position: 'absolute', top: '50%', left: '50%',

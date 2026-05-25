@@ -6,6 +6,7 @@ import {
 import api from '../api/axios';
 import { useAppTheme } from '../hooks/useAppTheme';
 import { saveQuizResult } from '../utils/quizStorage';
+import { TIER_CONFIG, TIERS, TIER_DEFAULT_BLOOM } from '../utils/tierUtils';
 
 const BLOOM_LEVELS = [
     { key: 'remember',   label: 'Remember',   desc: 'Recall facts & definitions' },
@@ -23,6 +24,10 @@ const QuizModal = ({
     topicId, moduleId, courseId,
     difficulty: initDiff = 'Intermediate',
     onComplete,
+    // Tier mode: bypasses CONFIG stage, loads tier-specific quiz directly
+    tierMode = false,
+    difficultyTier = null,
+    existingUnlocks = null,
 }) => {
     const { theme, accent } = useAppTheme();
     const aGrad = `linear-gradient(135deg,${accent.from},${accent.to})`;
@@ -53,9 +58,63 @@ const QuizModal = ({
     bloomRef.current = bloomLevel;
     const submittingRef = useRef(false); // guard against double-submit
 
-    // Check for teacher-generated quiz on open
+    // In tier mode: auto-load the tier quiz and skip CONFIG entirely
     useEffect(() => {
-        if (!isOpen || !topicId || !courseId) { setTeacherQuiz(null); return; }
+        if (!isOpen || !tierMode || !difficultyTier || !topicId || !courseId) return;
+
+        const tierConfig = TIER_CONFIG[difficultyTier];
+        const fallbackBloom = TIER_DEFAULT_BLOOM[difficultyTier] || tierConfig?.bloomLevels[0] || 'remember';
+
+        setStage('loading');
+        setGenError(null);
+        setAnswers({});
+        answersRef.current = {};
+        setCurrent(0);
+        setRevealed(false);
+        startRef.current = Date.now();
+        setIsTeacherAssessment(true);
+
+        api.get(`/rag/topic-quiz/${courseId}/${topicId}?tier=${difficultyTier}`)
+            .then(async (res) => {
+                if (res.data.exists && res.data.questions?.length) {
+                    const qs = res.data.questions;
+                    const bl = res.data.bloomLevel || fallbackBloom;
+                    setBloomLevel(bl);
+                    bloomRef.current = bl;
+                    setQuestions(qs);
+                    questionsRef.current = qs;
+                    setNumQs(qs.length);
+                    setStage('active');
+                } else {
+                    // Fallback: AI-generate with tier's bloom level
+                    const genRes = await api.post('/ai-assistant/generate-topic-quiz', {
+                        topicTitle,
+                        bloomLevel: fallbackBloom,
+                        numQuestions: numQs,
+                        ...(courseId && { courseId }),
+                        ...(moduleId && { moduleId }),
+                        ...(topicId && { topicId }),
+                    });
+                    const qs = genRes.data.questions || [];
+                    if (!qs.length) throw new Error('No questions generated');
+                    setBloomLevel(fallbackBloom);
+                    bloomRef.current = fallbackBloom;
+                    setQuestions(qs);
+                    questionsRef.current = qs;
+                    setStage('active');
+                }
+            })
+            .catch(err => {
+                console.error('Tier quiz load failed', err);
+                setGenError('Failed to load quiz. Please try again.');
+                setStage('config');
+            });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen, tierMode, difficultyTier]);
+
+    // Check for teacher-generated quiz on open (non-tier mode only)
+    useEffect(() => {
+        if (!isOpen || !topicId || !courseId || tierMode) { if (!tierMode) setTeacherQuiz(null); return; }
         setCheckingTeacher(true);
         api.get(`/rag/topic-quiz/${courseId}/${topicId}`)
             .then(res => {
@@ -67,7 +126,7 @@ const QuizModal = ({
             })
             .catch(() => setTeacherQuiz(null))
             .finally(() => setCheckingTeacher(false));
-    }, [isOpen, topicId, courseId]);
+    }, [isOpen, topicId, courseId, tierMode]);
 
     // Sync answers ref
     useEffect(() => { answersRef.current = answers; }, [answers]);
@@ -139,8 +198,9 @@ const QuizModal = ({
         }
     };
 
+    // Standard quiz: one click locks answer, reveals correct/wrong, shows feedback, Next button appears
     const selectAnswer = (opt) => {
-        if (answers[current] !== undefined) return;
+        if (answers[current] !== undefined) return; // already answered, locked
         const newAnswers = { ...answers, [current]: opt };
         setAnswers(newAnswers);
         answersRef.current = newAnswers;
@@ -215,6 +275,7 @@ const QuizModal = ({
                 bloomLevel: bloom,
                 topicTitle,
                 isTeacherAssessment,
+                difficultyTier: tierMode ? difficultyTier : null,
                 wrongQuestions: mistakes.map(m => ({
                     questionText: m.question,
                     studentAnswer: m.userAnswer,
@@ -230,13 +291,19 @@ const QuizModal = ({
         }
 
         // Notify analytics page to reload
-        window.dispatchEvent(new StorageEvent('storage', { key: 'sb_quiz_results' }));
+        window.dispatchEvent(new StorageEvent('storage', { key: 'sb_quiz_results_' }));
 
         onComplete?.(resultData);
     };
 
     const reset = () => {
         submittingRef.current = false;
+        // In tier mode, retaking means re-triggering the tier load via onClose (parent re-opens)
+        // In normal mode, go back to config
+        if (tierMode) {
+            onClose();
+            return;
+        }
         setStage('config');
         setBloomLevel('understand');
         setQuestions([]);
@@ -420,14 +487,20 @@ const QuizModal = ({
                                 const wrong = revealed && sel && !correct;
                                 let bg = theme.surface, brd = theme.border, col = theme.textPrimary;
                                 if (correct) { bg = 'rgba(34,197,94,0.12)'; brd = '#22c55e55'; col = '#22c55e'; }
-                                if (wrong) { bg = 'rgba(239,68,68,0.12)'; brd = '#ef444455'; col = '#ef4444'; }
+                                if (wrong)   { bg = 'rgba(239,68,68,0.12)'; brd = '#ef444455'; col = '#ef4444'; }
                                 if (sel && !revealed) { bg = `${accent.from}15`; brd = accent.from; }
+                                // Strip letter prefix "A) " to get the raw content
+                                const rawText = opt.replace(/^[A-D]\)\s*/i, '');
+                                const isCode = /\bfunction\b|\bconst\b|\bvar\b|\blet\b|\b=>\b|\bwhile\b|\bfor\(|\bclass\b/.test(rawText) && rawText.includes('{');
                                 return (
-                                    <button key={i} onClick={() => selectAnswer(opt)} disabled={answers[current] !== undefined} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '12px', border: `1px solid ${brd}`, background: bg, color: col, cursor: answers[current] !== undefined ? 'default' : 'pointer', textAlign: 'left', transition: 'all .18s', fontFamily: "'DM Sans',sans-serif" }}>
-                                        <div style={{ width: '26px', height: '26px', borderRadius: '50%', border: `2px solid ${brd}`, background: correct ? '#22c55e' : wrong ? '#ef4444' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: '11px', fontWeight: 700, color: (correct || wrong) ? '#fff' : col }}>
+                                    <button key={i} onClick={() => selectAnswer(opt)} disabled={answers[current] !== undefined} style={{ width: '100%', display: 'flex', alignItems: isCode ? 'flex-start' : 'center', gap: '12px', padding: '12px 14px', borderRadius: '12px', border: `1px solid ${brd}`, background: bg, color: col, cursor: answers[current] !== undefined ? 'default' : 'pointer', textAlign: 'left', transition: 'all .18s', fontFamily: "'DM Sans',sans-serif" }}>
+                                        <div style={{ width: '26px', height: '26px', borderRadius: '50%', border: `2px solid ${brd}`, background: correct ? '#22c55e' : wrong ? '#ef4444' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: '11px', fontWeight: 700, color: (correct || wrong) ? '#fff' : col, marginTop: isCode ? '1px' : '0' }}>
                                             {correct ? '✓' : wrong ? '✗' : String.fromCharCode(65 + i)}
                                         </div>
-                                        <span style={{ fontSize: '14px', fontWeight: 500 }}>{opt}</span>
+                                        {isCode
+                                            ? <pre style={{ margin: 0, fontSize: '12px', fontFamily: "'Fira Code','Cascadia Code',Consolas,monospace", whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.55, color: col, flex: 1 }}>{rawText.replace(/;\s*/g, ';\n').replace(/\{\s*/g, '{\n  ').replace(/\}\s*/g, '\n}')}</pre>
+                                            : <span style={{ fontSize: '14px', fontWeight: 500 }}>{opt}</span>
+                                        }
                                         {correct && <CheckCircle size={15} style={{ marginLeft: 'auto', color: '#22c55e', flexShrink: 0 }} />}
                                         {wrong && <XCircle size={15} style={{ marginLeft: 'auto', color: '#ef4444', flexShrink: 0 }} />}
                                     </button>
@@ -435,8 +508,19 @@ const QuizModal = ({
                             })}
                         </div>
 
+                        {/* Hint — shown when wrong answer selected (teacher tier quiz has specific hints; AI quiz shows generic) */}
+                        {revealed && answers[current] !== questions[current].correctAnswer && (
+                            <div style={{ marginTop: '14px', padding: '12px 14px', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: '10px' }}>
+                                <div style={{ fontSize: '11px', fontWeight: 700, color: '#fbbf24', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>💡 Hint</div>
+                                <div style={{ fontSize: '13px', color: theme.textSecondary, lineHeight: 1.6 }}>
+                                    {questions[current].hint || "Not quite — the correct answer is highlighted above."}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Explanation — always shown after answering */}
                         {revealed && questions[current].explanation && (
-                            <div style={{ marginTop: '14px', padding: '12px 14px', background: `${accent.from}10`, border: `1px solid ${accent.from}25`, borderRadius: '10px' }}>
+                            <div style={{ marginTop: '10px', padding: '12px 14px', background: `${accent.from}10`, border: `1px solid ${accent.from}25`, borderRadius: '10px' }}>
                                 <div style={{ fontSize: '11px', fontWeight: 700, color: accent.from, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>💡 Explanation</div>
                                 <div style={{ fontSize: '13px', color: theme.textSecondary, lineHeight: 1.6 }}>{questions[current].explanation}</div>
                             </div>
@@ -475,8 +559,32 @@ const QuizModal = ({
                             }
                         </div>
 
-                        {/* Teacher quiz completion banner */}
-                        {isTeacherAssessment && result.pct >= 80 && (
+                        {/* Tier unlock banner */}
+                        {tierMode && difficultyTier && result.pct >= 80 && (() => {
+                            const tierIdx = TIERS.indexOf(difficultyTier);
+                            const nextTier = tierIdx < TIERS.length - 1 ? TIERS[tierIdx + 1] : null;
+                            const tierConfig = TIER_CONFIG[difficultyTier];
+                            return (
+                                <div style={{ background: `${tierConfig.color}14`, border: `1px solid ${tierConfig.color}40`, borderRadius: '12px', padding: '14px 16px', marginBottom: '16px', textAlign: 'center' }}>
+                                    <div style={{ fontSize: '22px', marginBottom: '4px' }}>🎉</div>
+                                    <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 700, color: tierConfig.color, fontSize: '15px' }}>
+                                        {tierConfig.label} Passed!
+                                    </div>
+                                    {nextTier ? (
+                                        <div style={{ fontSize: '12px', color: TIER_CONFIG[nextTier].color, marginTop: '4px', fontWeight: 600 }}>
+                                            {TIER_CONFIG[nextTier].label} is now unlocked!
+                                        </div>
+                                    ) : (
+                                        <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '4px' }}>
+                                            You've completed all Bloom's tiers for this topic!
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })()}
+
+                        {/* Teacher quiz completion banner (non-tier mode) */}
+                        {!tierMode && isTeacherAssessment && result.pct >= 80 && (
                             <div style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: '12px', padding: '14px 16px', marginBottom: '16px', textAlign: 'center' }}>
                                 <div style={{ fontSize: '24px', marginBottom: '4px' }}>🏆</div>
                                 <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 700, color: '#22c55e', fontSize: '15px' }}>Topic Completed!</div>
