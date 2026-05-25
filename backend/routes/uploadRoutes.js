@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const auth = require('../middleware/auth');
 
 // Configure storage
 const storage = multer.diskStorage({
@@ -37,7 +38,7 @@ const upload = multer({
 });
 
 // Upload route
-router.post('/', (req, res) => {
+router.post('/', auth, (req, res) => {
     upload.single('file')(req, res, function (err) {
         if (err instanceof multer.MulterError) {
             // A Multer error occurred when uploading.

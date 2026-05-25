@@ -52,6 +52,8 @@ app.use('/api/upload', require('./routes/uploadRoutes'));
 app.use('/api/analytics', require('./routes/analyticsRoutes'));
 app.use('/api/rag', require('./routes/rag'));
 app.use('/api/chat', require('./routes/chatRoutes'));
+app.use('/api/assignments', require('./routes/assignmentRoutes'));
+app.use('/api/class-tests', require('./routes/classTestRoutes'));
 
 // Serve Uploads
 app.use('/uploads', express.static('uploads'));

@@ -49,6 +49,7 @@ const generatedQuestionSchema = new mongoose.Schema(
         options: [optionSchema],          // MCQ / True-False
         correctAnswer: { type: String },  // All types except MCQ (where isCorrect is on options)
         explanation: { type: String },
+        hint: { type: String, default: '' },
         difficulty: {
             type: String,
             enum: ['easy', 'medium', 'hard'],
@@ -60,6 +61,13 @@ const generatedQuestionSchema = new mongoose.Schema(
             type: String,
             enum: ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create', 'mixed'],
             default: 'understand',
+            index: true,
+        },
+        // Groups bloomLevel into 3 progressive tiers for the unlock system
+        difficultyTier: {
+            type: String,
+            enum: ['beginner', 'intermediate', 'advanced'],
+            default: null,
             index: true,
         },
 
@@ -88,6 +96,7 @@ const generatedQuestionSchema = new mongoose.Schema(
 generatedQuestionSchema.index({ courseId: 1, origin: 1, bloomLevel: 1 });
 generatedQuestionSchema.index({ courseId: 1, origin: 1, approved: 1 });
 generatedQuestionSchema.index({ sessionId: 1, origin: 1 });
+generatedQuestionSchema.index({ courseId: 1, topicId: 1, origin: 1, difficultyTier: 1 });
 
 // Auto-delete student practice questions after 30 days
 generatedQuestionSchema.index(

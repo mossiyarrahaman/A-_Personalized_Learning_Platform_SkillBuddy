@@ -1,5 +1,6 @@
 const Doubt = require('../models/Doubt');
 const aiService = require('../services/ai-service');
+const { TEACHER_PERSONA_SYSTEM } = require('../prompts/teacherPersona');
 
 exports.createDoubt = async (req, res) => {
     try {
@@ -20,12 +21,12 @@ exports.createDoubt = async (req, res) => {
         // AI Auto-Response
         try {
             console.log("Generating AI response for doubt...");
-            const aiResponse = await aiService.callOpenRouter(`
-            User asked: "${title}"
-            Details: "${description}"
-            Provide a helpful, technical answer as an instructor.
-            Keep it concise.
-        `);
+            const aiResponse = await aiService.callOpenRouter(
+                `A student has asked:\n\nQuestion: "${title}"${description ? `\nDetails: "${description}"` : ''}\n\nAnswer in your teacher voice. Be direct and clear. Use markdown:\n- Open with an everyday analogy if it helps the explanation (> 💡 Intuition:)\n- Core explanation in 2–3 short paragraphs\n- > ⚠️ Common mistake: callout if there's a classic trap here\n- End with > 🎯 Quick check: so the student can verify they got it\n\nKeep the whole answer under 300 words. No "great question!", no "I hope this helps".`,
+                4000,
+                0.75,
+                TEACHER_PERSONA_SYSTEM
+            );
 
             doubt.answers.push({
                 responderName: 'AI Assistant',

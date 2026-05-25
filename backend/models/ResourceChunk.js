@@ -67,11 +67,24 @@ const resourceChunkSchema = new mongoose.Schema(
         // Metadata
         source: { type: String },    // original filename
         fileType: { type: String },   // pdf | docx | pptx
+
+        // ── Vector Embedding ────────────────────────────────────────────────
+        // Populated asynchronously after insertMany by embeddingService.
+        // select:false avoids loading ~4 KB of floats on every BM25 query.
+        embedding: {
+            type: [Number],
+            default: undefined,
+            select: false,
+        },
+        embeddingModel: { type: String, default: null },
+        embeddedAt:     { type: Date,   default: null },
     },
     { timestamps: true }
 );
 
 // Compound index for fast retrieval by course
 resourceChunkSchema.index({ courseId: 1, fileId: 1 });
+// Index for re-indexing queries (find un-embedded chunks)
+resourceChunkSchema.index({ courseId: 1, embeddedAt: 1 });
 
 module.exports = mongoose.model('ResourceChunk', resourceChunkSchema);

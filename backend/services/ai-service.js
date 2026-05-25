@@ -4,6 +4,7 @@
 // ============================================================================
 
 const axios = require('axios');
+const { TEACHER_PERSONA_SYSTEM } = require('../prompts/teacherPersona');
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const AI_MODEL = process.env.AI_MODEL || 'qwen/qwen-2.5-7b-instruct';
@@ -66,7 +67,7 @@ function cleanJSONResponse(text) {
 // ============================================================================
 // callOpenRouter
 // ============================================================================
-async function callOpenRouter(prompt, maxTokens = 4000, temperature = 0.7) {
+async function callOpenRouter(prompt, maxTokens = 4000, temperature = 0.7, systemPrompt = null) {
   if (!OPENROUTER_API_KEY) throw new Error('OpenRouter API key not configured.');
 
   try {
@@ -79,7 +80,8 @@ async function callOpenRouter(prompt, maxTokens = 4000, temperature = 0.7) {
         messages: [
           {
             role: 'system',
-            content: 'You are a helpful educational assistant. Always respond with valid JSON only. ' +
+            content: systemPrompt ||
+              'You are a helpful educational assistant. Always respond with valid JSON only. ' +
               'Do NOT include markdown formatting, code fences, or any text outside the JSON. ' +
               'Keep all string values concise.'
           },
@@ -265,36 +267,47 @@ Field: ${safeField}, Level: ${safeLevel}.`;
 // ============================================================================
 async function generateResourceRecommendations(field, level, weakTopics) {
   const topicsText = Array.isArray(weakTopics) ? weakTopics.join(', ') : 'general concepts';
+  const topicTitle = Array.isArray(weakTopics) && weakTopics.length > 0 ? weakTopics[0] : field;
 
-  const prompt = `As an expert teacher, provide a lesson plan for ${level} ${field}, focusing on: ${topicsText}.
+  const systemMsg = TEACHER_PERSONA_SYSTEM + `
 
-Return ONLY valid JSON. No markdown.
-
+OUTPUT FORMAT: Respond with ONLY a valid JSON object — no text before or after:
 {
-  "content": "### Introduction\\nThis topic covers...\\n\\n### Key Concepts\\n1. **Concept A**: ...",
+  "content": "<your full markdown topic guide — use \\n for line breaks inside this JSON string>",
   "recommendations": [
-    {
-      "type": "youtube",
-      "title": "Video Title",
-      "url": "https://youtube.com/...",
-      "difficulty": "Intermediate",
-      "topic": "Concept"
-    }
+    { "type": "youtube|article|practice|reference", "title": "...", "url": "https://...", "difficulty": "...", "topic": "..." }
   ]
 }
+The "content" value is your complete markdown guide with all sections.
+The "recommendations" array must have exactly 5 items.`;
 
-Requirements:
-- content: 300-500 word explanatory mini-lesson with sections
-- recommendations: 5 high-quality links (YouTube, articles, docs)`;
+  const userMsg = `You're writing a topic guide for one of your students.
+
+STUDENT CONTEXT
+- Field of study: ${field}
+- Level: ${level}
+- Topics to cover: ${topicsText}
+
+Write a topic guide for "${topicTitle}" with these sections in order:
+
+## What you're about to learn
+## Why this matters
+## The core idea   ← open with > 💡 Intuition: [everyday analogy]
+## How it works in practice   ← open with > 🔧 In practice: [real scenario]
+## What trips students up   ← use > ⚠️ Common mistake:
+## Check yourself   ← use > 🎯 Quick check:
+
+Return the guide as the "content" JSON string (\\n for line breaks).
+Also provide 5 resource recommendations as the "recommendations" array — mix of youtube, article, practice, reference types. All suitable for a ${level} learner.`;
 
   try {
-    const response = await callOpenRouter(prompt, 4000);
+    const response = await callOpenRouter(userMsg, 4000, 0.78, systemMsg);
     const cleaned = cleanJSONResponse(response);
     return JSON.parse(cleaned);
   } catch (error) {
     console.error('❌ generateResourceRecommendations failed:', error.message);
     return {
-      content: `### Overview\nHere is a brief overview of ${topicsText}.\n\n(AI generation failed — please consult external resources.)`,
+      content: `## Overview\nHere is a brief overview of ${topicsText}.\n\n(AI generation failed — please consult external resources.)`,
       recommendations: [{ type: 'article', title: `${field} Documentation`, url: 'https://docs.google.com', difficulty: level, topic: field }]
     };
   }
@@ -393,7 +406,9 @@ RULES (follow every one strictly):
    FORBIDDEN words/phrases in questions: ${stems.forbidden.join(', ')}.
 3. No question may start with the literal word "${safeTopic}" — rephrase so the subject is clear from context.
 4. 4 answer options each; exactly one is unambiguously correct.
-5. Return ONLY a valid JSON array of exactly ${numQuestions} objects — no markdown, no text outside the JSON array.
+5. DISTINCT OPTIONS: ALL 4 options must be completely different from each other. No two options may have identical or near-identical text. Each wrong answer must be a plausible but clearly distinct distractor.
+6. CODE OPTIONS: If the question involves code snippets as answer options, put each complete code snippet inside the option string itself. Use single-line format with semicolons — do NOT use actual newlines inside option strings. The "code" field is for a code snippet shown AS PART OF THE QUESTION (context code), leave it empty string if the question text alone is sufficient.
+7. Return ONLY a valid JSON array of exactly ${numQuestions} objects — no markdown, no text outside the JSON array.
 
 JSON format (return EXACTLY ${numQuestions} elements):
 [
@@ -416,16 +431,27 @@ JSON format (return EXACTLY ${numQuestions} elements):
     if (!Array.isArray(questions)) throw new Error('Not an array');
     const sliced = questions.slice(0, numQuestions);
     console.log(`✅ generateTopicQuiz: got ${questions.length} questions (returning ${sliced.length})`);
-    return sliced.map((q, i) => ({
-      question: q.question || `Question ${i + 1}`,
-      code: q.code || '',
-      options: Array.isArray(q.options) ? q.options.slice(0, 4) : ['A', 'B', 'C', 'D'],
-      correctAnswer: q.correctAnswer || (q.options ? q.options[0] : 'A'),
-      explanation: q.explanation || 'No explanation provided.',
-      hint: q.hint || 'No hint available.',
-      bloomLevel: q.bloomLevel || bloomLevel,
-      difficulty: q.difficulty || 5
-    }));
+    return sliced.map((q, i) => {
+      const rawOpts = Array.isArray(q.options) ? q.options.slice(0, 4) : ['A', 'B', 'C', 'D'];
+      // Deduplicate: drop options with identical text to an earlier one
+      const seen = new Set();
+      const uniqueOpts = rawOpts.filter(o => {
+        const key = o.replace(/^[A-D]\)\s*/i, '').trim().toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      return {
+        question: q.question || `Question ${i + 1}`,
+        code: q.code || '',
+        options: uniqueOpts,
+        correctAnswer: q.correctAnswer || rawOpts[0] || 'A',
+        explanation: q.explanation || 'No explanation provided.',
+        hint: q.hint || 'No hint available.',
+        bloomLevel: q.bloomLevel || bloomLevel,
+        difficulty: q.difficulty || 5
+      };
+    });
   } catch (error) {
     console.error('❌ generateTopicQuiz failed:', error.message);
     return Array.from({ length: numQuestions }, (_, i) => ({
@@ -503,14 +529,19 @@ async function generateTopicStepPlan(field, level, topicTitle, moduleTitle, subt
 
   const stepCount = subtopics.length > 0 ? subtopics.length : 4;
 
-  const prompt = `You are a senior ${field} instructor with 10+ years of teaching experience. \
-Create a rich, classroom-quality learning plan for the topic "${topicTitle}" (module: "${moduleTitle}") \
-for a ${level} learner in ${field}.
+  const systemMsg = TEACHER_PERSONA_SYSTEM + `
+
+OUTPUT FORMAT: Respond with ONLY valid JSON following the exact schema in the user message.
+Apply the teacher voice to all "explanation" and "teacherNote" string fields within the JSON.
+Use callout patterns (💡 Intuition: / 🔧 In practice: / ⚠️ Common mistake: / 🎯 Quick check:) inside explanation strings where they fit naturally.
+Represent line breaks inside JSON string values as \\n.`;
+
+  const prompt = `You're writing a structured lesson on "${topicTitle}" (module: "${moduleTitle}") for a ${level} learner in ${field}.
 
 Generate EXACTLY ${stepCount} steps — one per subtopic listed:
 ${subtopicList}
 
-Return ONLY valid JSON. No markdown, no extra text.
+Return ONLY valid JSON. No text before or after the JSON object.
 
 {
   "objectives": [
@@ -523,8 +554,8 @@ Return ONLY valid JSON. No markdown, no extra text.
     {
       "stepNumber": 1,
       "title": "EXACT subtopic title from the list",
-      "explanation": "3-4 sentences: what this concept is, WHY it matters in real projects, and how it connects to ${topicTitle} as a whole. Be specific and concrete. Include one everyday real-world analogy a student can immediately relate to.",
-      "teacherNote": "One insider tip, gotcha, or best-practice observation that only an experienced ${field} practitioner would know. Start with 'Pro tip:' or 'Watch out:'.",
+      "explanation": "2-3 short paragraphs in teacher voice. Open with an everyday analogy (> 💡 Intuition:) BEFORE the formal definition. Then at least one of: > 🔧 In practice: (real scenario), > ⚠️ Common mistake: (trap). Build directly from the prior step. Use \\n for line breaks.",
+      "teacherNote": "One human aside — the kind of thing a teacher says out loud in class. Start with 'I tell my students…' or 'The thing to remember here…' Warm and specific.",
       "exampleCode": "A minimal, self-contained code snippet demonstrating this concept. Use empty string if not code-related.",
       "exampleExplanation": "2-3 sentences walking through what the example shows and why it was written that way.",
       "keyPoints": [
@@ -532,8 +563,8 @@ Return ONLY valid JSON. No markdown, no extra text.
         "Second key concept or fact to remember",
         "Third key concept or fact to remember"
       ],
-      "commonMistake": "One sentence: the single most common mistake ${level} learners make on this subtopic and how to avoid it.",
-      "action": "A concrete, hands-on task the student should do right now (build something, modify an example, answer a question).",
+      "commonMistake": "The one mistake students make at THIS step specifically — not the overall topic. One or two sentences, specific enough to be actionable.",
+      "action": "What the student should do right now to lock this in — write code, sketch a diagram, predict an output, or explain it to themselves out loud. Be specific about exactly what to do.",
       "estimatedTime": "25 min",
       "resources": [
         {
@@ -587,7 +618,7 @@ Rules:
 Field: ${field}, Level: ${level}, Topic: ${topicTitle}`;
 
   try {
-    const response = await callOpenRouter(prompt, 8000);
+    const response = await callOpenRouter(prompt, 8000, 0.77, systemMsg);
     const cleaned = cleanJSONResponse(response);
     const plan = JSON.parse(cleaned);
 

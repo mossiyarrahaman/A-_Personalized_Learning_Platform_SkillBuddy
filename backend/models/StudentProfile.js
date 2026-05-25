@@ -115,6 +115,18 @@ const studentProfileSchema = new mongoose.Schema({
         }]
     }],
 
+    quizHistory: [{
+        topicTitle: { type: String, default: '' },
+        score: { type: Number, default: 0 },
+        totalQuestions: { type: Number, default: 0 },
+        correctAnswers: { type: Number, default: 0 },
+        bloomLevel: { type: String, default: '' },
+        difficulty: { type: String, default: '' },
+        wrongQuestions: { type: mongoose.Schema.Types.Mixed, default: [] },
+        timeTaken: { type: Number, default: 0 },
+        attemptDate: { type: Date, default: Date.now },
+    }],
+
     streakHistory: [{
         date: Date,
         active: Boolean

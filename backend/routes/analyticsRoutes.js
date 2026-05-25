@@ -186,4 +186,105 @@ router.get('/:courseId/teacher-quiz-results', auth, verifyCourseTeacher, async (
     }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// GET /api/analytics/:courseId/tier-distribution
+// ═══════════════════════════════════════════════════════════════════════════════
+// Bloom's tier pass rates per topic and course-wide.
+// Used by TeacherAnalytics "Bloom Levels" tab.
+
+router.get('/:courseId/tier-distribution', auth, verifyCourseTeacher, async (req, res) => {
+    try {
+        const data = await analytics.tierDistribution(req.params.courseId);
+        res.json({ success: true, ...data });
+    } catch (err) {
+        console.error('Tier distribution error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GET /api/analytics/:courseId/student-tier-matrix
+// ═══════════════════════════════════════════════════════════════════════════════
+// Student × topic grid with per-tier pass/attempt status.
+// Used by TeacherAnalytics "Student Tiers" tab.
+
+router.get('/:courseId/student-tier-matrix', auth, verifyCourseTeacher, async (req, res) => {
+    try {
+        const data = await analytics.studentTierMatrix(req.params.courseId);
+        res.json({ success: true, ...data });
+    } catch (err) {
+        console.error('Student tier matrix error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GET /api/analytics/:courseId/study-time?from=YYYY-MM-DD&to=YYYY-MM-DD
+// ═══════════════════════════════════════════════════════════════════════════════
+// Per-student and class-wide daily study time for a given date range.
+
+router.get('/:courseId/study-time', auth, verifyCourseTeacher, async (req, res) => {
+    try {
+        const to = req.query.to || new Date().toISOString().slice(0, 10);
+        const from = req.query.from || (() => {
+            const d = new Date(); d.setDate(d.getDate() - 29); return d.toISOString().slice(0, 10);
+        })();
+        const data = await analytics.studyTimeTrend(req.params.courseId, from, to);
+        res.json({ success: true, ...data });
+    } catch (err) {
+        console.error('Study time trend error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GET /api/analytics/:courseId/assignment-results
+// ═══════════════════════════════════════════════════════════════════════════════
+// Per-assignment grade summary for the Assignment Grades analytics tab.
+
+router.get('/:courseId/assignment-results', auth, verifyCourseTeacher, async (req, res) => {
+    try {
+        const Assignment = require('../models/Assignment');
+        const AssignmentSubmission = require('../models/AssignmentSubmission');
+
+        const assignments = await Assignment.find({
+            courseId: req.params.courseId,
+            isPublished: true,
+        }).sort({ createdAt: 1 }).lean();
+
+        const results = await Promise.all(assignments.map(async (a) => {
+            const subs = await AssignmentSubmission.find({ assignmentId: a._id })
+                .populate('studentId', 'name email')
+                .lean();
+            const graded = subs.filter(s => s.status === 'returned' && s.grade !== null);
+            const avgGrade = graded.length
+                ? Math.round(graded.reduce((sum, s) => sum + s.grade, 0) / graded.length)
+                : null;
+            return {
+                assignmentId: a._id,
+                title: a.title,
+                topicId: a.topicId,
+                dueDate: a.dueDate,
+                maxPoints: a.maxPoints,
+                totalSubmissions: subs.length,
+                gradedCount: graded.length,
+                avgGrade,
+                students: subs.map(s => ({
+                    studentId: s.studentId?._id,
+                    name: s.studentId?.name || 'Unknown',
+                    grade: s.grade,
+                    maxPoints: a.maxPoints,
+                    status: s.status,
+                    submittedAt: s.submittedAt,
+                })),
+            };
+        }));
+
+        res.json({ success: true, assignments: results });
+    } catch (err) {
+        console.error('Assignment results analytics error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;

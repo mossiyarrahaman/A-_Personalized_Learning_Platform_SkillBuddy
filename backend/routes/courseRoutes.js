@@ -18,6 +18,11 @@ router.get('/:courseId/module/:moduleId/topic/:topicId/analytics', auth, courseC
 // Topic Quiz Routes
 router.get('/:courseId/module/:moduleId/topic/:topicId/quiz', auth, courseController.adminTopicQuiz);
 router.post('/:courseId/module/:moduleId/topic/:topicId/quiz/submit', auth, courseController.submitTopicQuiz);
+router.get('/:courseId/my-tier-scores', auth, courseController.getMyTierScores);
+
+// Student quiz stats (real per-student data from DB)
+router.get('/my-quiz-stats',    auth, courseController.getMyQuizStats);
+router.post('/save-quiz-result', auth, courseController.saveQuizResultRecord);
 
 // Student Class Routes
 router.get('/student/available-courses', auth, courseController.getAvailableCourses); // Browse joinable courses

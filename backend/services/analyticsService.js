@@ -105,14 +105,13 @@ async function classOverview(courseId) {
         if (!p.student) continue;
 
         const daysSince = daysBetween(now, new Date(p.lastAccessed));
-        const completionPct = totalTopics > 0 ? Math.round((p.completedTopics.length / totalTopics) * 100) : 0;
+        const completionPct = totalTopics > 0 ? Math.min(Math.round((p.completedTopics.length / totalTopics) * 100), 100) : 0;
 
-        // Compute risk inline (in case it wasn't pre-computed)
+        // Trust the stored riskFlag (set by computeRiskFlag on each quiz submission).
+        // Only escalate for time-based staleness — never downgrade score/fail dimensions.
         let risk = p.riskFlag || 'on_track';
         if (daysSince > 14) risk = 'inactive';
-        else if (daysSince > 7) risk = 'critical';
-        else if ((p.avgQuizScore || 0) < 40 || (p.topicQuizScores || []).filter(q => !q.passed).length >= 5) risk = 'critical';
-        else if ((p.avgQuizScore || 0) < 55 || daysSince > 4) risk = 'at_risk';
+        else if (daysSince > 7 && risk !== 'inactive') risk = 'critical';
 
         riskCounts[risk]++;
 
@@ -121,7 +120,7 @@ async function classOverview(courseId) {
             name: p.student.name,
             email: p.student.email,
             completionPct,
-            completedTopics: p.completedTopics.length,
+            completedTopics: Math.min(p.completedTopics.length, totalTopics),
             avgQuizScore: Math.round(p.avgQuizScore || 0),
             totalTimeSpent: p.totalTimeSpent || 0,
             totalTimeFormatted: formatTime(p.totalTimeSpent || 0),
@@ -419,9 +418,10 @@ async function studentDeepDive(courseId, studentId) {
 
     // ── Compute risk ─────────────────────────────────────────────────────────
     const daysSince = daysBetween(now, new Date(progress.lastAccessed));
+    // Trust stored riskFlag; only escalate for time — don't downgrade score/fail dimensions.
     let risk = progress.riskFlag || 'on_track';
     if (daysSince > 14) risk = 'inactive';
-    else if (daysSince > 7) risk = 'critical';
+    else if (daysSince > 7 && risk !== 'inactive') risk = 'critical';
 
     return {
         student: {
@@ -431,7 +431,7 @@ async function studentDeepDive(courseId, studentId) {
         },
         courseTitle: course.title,
         summary: {
-            completionPct: totalTopics > 0 ? Math.round((progress.completedTopics.length / totalTopics) * 100) : 0,
+            completionPct: totalTopics > 0 ? Math.min(Math.round((progress.completedTopics.length / totalTopics) * 100), 100) : 0,
             completedTopics: progress.completedTopics.length,
             totalTopics,
             avgQuizScore: Math.round(progress.avgQuizScore || 0),
@@ -568,8 +568,8 @@ async function courseLeaderboard(courseId) {
     const leaderboard = progressRecords
         .filter(p => p.student)
         .map(p => {
-            const completionPct = totalTopics > 0 ? (p.completedTopics.length / totalTopics) * 100 : 0;
-            const quizScore = p.avgQuizScore || 0;
+            const completionPct = totalTopics > 0 ? Math.min((p.completedTopics.length / totalTopics) * 100, 100) : 0;
+            const quizScore = Math.min(p.avgQuizScore || 0, 100);
             const timeScore = Math.min((p.totalTimeSpent || 0) / 3600, 50); // Cap at 50 hours
 
             // Composite score: 40% completion + 40% quiz performance + 20% time invested
@@ -599,7 +599,7 @@ async function courseLeaderboard(courseId) {
                 totalTimeSpent: formatTime(p.totalTimeSpent || 0),
                 streak,
                 quizzesTaken: (p.topicQuizScores || []).length,
-                topicsCompleted: p.completedTopics.length,
+                topicsCompleted: Math.min(p.completedTopics.length, totalTopics),
             };
         })
         .sort((a, b) => b.compositeScore - a.compositeScore)
@@ -633,7 +633,7 @@ async function atRiskStudents(courseId) {
         if (!p.student) continue;
 
         const daysSince = daysBetween(now, new Date(p.lastAccessed));
-        const completionPct = totalTopics > 0 ? Math.round((p.completedTopics.length / totalTopics) * 100) : 0;
+        const completionPct = totalTopics > 0 ? Math.min(Math.round((p.completedTopics.length / totalTopics) * 100), 100) : 0;
         const avgScore = Math.round(p.avgQuizScore || 0);
         const recentQuizzes = (p.topicQuizScores || []).slice(-5);
         const recentFailures = recentQuizzes.filter(q => !q.passed);
@@ -823,21 +823,31 @@ async function teacherQuizResults(courseId) {
         for (const q of teacherAttempts) {
             if (!topicResults[q.topicId]) continue;
             const sid = p.student._id.toString();
-            const existing = topicResults[q.topicId].students.find(s => s.studentId.toString() === sid);
-            if (existing) {
-                if (q.score > existing.bestScore) {
-                    existing.bestScore = q.score;
-                    existing.passed = q.score >= 80;
-                }
-                existing.attempts++;
-            } else {
-                topicResults[q.topicId].students.push({
+            let existing = topicResults[q.topicId].students.find(s => s.studentId.toString() === sid);
+            if (!existing) {
+                existing = {
                     studentId: p.student._id,
                     name: p.student.name,
                     bestScore: q.score,
                     passed: q.score >= 80,
-                    attempts: 1,
-                });
+                    attempts: 0,
+                    tiers: { beginner: null, intermediate: null, advanced: null },
+                };
+                topicResults[q.topicId].students.push(existing);
+            }
+            existing.attempts++;
+            if (q.score > existing.bestScore) {
+                existing.bestScore = q.score;
+                existing.passed = q.score >= 80;
+            }
+            const tier = q.difficultyTier;
+            if (tier && tier in existing.tiers) {
+                const t = existing.tiers[tier];
+                if (!t || q.score > t.bestScore) {
+                    existing.tiers[tier] = { bestScore: q.score, passed: q.score >= 80, attempts: (t?.attempts || 0) + 1 };
+                } else {
+                    t.attempts++;
+                }
             }
         }
     }
@@ -857,6 +867,187 @@ async function teacherQuizResults(courseId) {
     return { courseTitle: course.title, totalStudents: progressRecords.length, topics };
 }
 
+// ─── Tier distribution ───────────────────────────────────────────────────────
+// Returns how many students attempted / passed each difficulty tier per topic.
+
+async function tierDistribution(courseId) {
+    const course = await Course.findById(courseId).lean();
+    if (!course) throw new Error('Course not found');
+
+    const progressRecords = await Progress.find({ course: courseId }).lean();
+
+    // Collect all unique topic ids/titles from the course
+    const topicMeta = {};
+    for (const mod of course.modules || []) {
+        for (const t of mod.topics || []) {
+            const key = t.id || t._id?.toString();
+            if (key) topicMeta[key] = { title: t.title, moduleTitle: mod.title };
+        }
+    }
+
+    const TIERS = ['beginner', 'intermediate', 'advanced'];
+
+    // Build per-topic, per-tier accumulators
+    const topicStats = {}; // topicId → { tier → { attempted, passed, totalScore } }
+
+    for (const progress of progressRecords) {
+        for (const s of (progress.topicQuizScores || [])) {
+            if (!s.difficultyTier || !s.isTeacherAssessment) continue;
+            const tid = s.topicId;
+            if (!topicStats[tid]) topicStats[tid] = {};
+            if (!topicStats[tid][s.difficultyTier]) {
+                topicStats[tid][s.difficultyTier] = { attempted: 0, passed: 0, totalScore: 0 };
+            }
+            const stat = topicStats[tid][s.difficultyTier];
+            stat.attempted++;
+            stat.totalScore += s.score;
+            if (s.score >= 80) stat.passed++;
+        }
+    }
+
+    // Course-wide aggregates
+    const courseWide = {};
+    for (const tier of TIERS) courseWide[tier] = { attempted: 0, passed: 0, avgScore: 0, totalScore: 0 };
+
+    const topics = Object.keys(topicStats).map(topicId => {
+        const meta = topicMeta[topicId] || { title: topicId, moduleTitle: '' };
+        const tiers = {};
+        for (const tier of TIERS) {
+            const raw = topicStats[topicId][tier];
+            if (raw) {
+                const passRate = raw.attempted > 0 ? Math.round((raw.passed / raw.attempted) * 100) : 0;
+                const avgScore = raw.attempted > 0 ? Math.round(raw.totalScore / raw.attempted) : 0;
+                tiers[tier] = { attempted: raw.attempted, passed: raw.passed, passRate, avgScore };
+                courseWide[tier].attempted += raw.attempted;
+                courseWide[tier].passed += raw.passed;
+                courseWide[tier].totalScore += raw.totalScore;
+            } else {
+                tiers[tier] = { attempted: 0, passed: 0, passRate: 0, avgScore: 0 };
+            }
+        }
+        return { topicId, title: meta.title, moduleTitle: meta.moduleTitle, tiers };
+    });
+
+    for (const tier of TIERS) {
+        const cw = courseWide[tier];
+        cw.passRate = cw.attempted > 0 ? Math.round((cw.passed / cw.attempted) * 100) : 0;
+        cw.avgScore = cw.attempted > 0 ? Math.round(cw.totalScore / cw.attempted) : 0;
+        delete cw.totalScore;
+    }
+
+    return {
+        courseTitle: course.title,
+        totalStudents: progressRecords.length,
+        courseWide,
+        topics,
+    };
+}
+
+// ─── Student tier matrix ─────────────────────────────────────────────────────
+// Returns a grid: students (rows) × topics (columns), each cell showing tier pass status.
+
+async function studentTierMatrix(courseId) {
+    const course = await Course.findById(courseId).lean();
+    if (!course) throw new Error('Course not found');
+
+    // Ordered topic list from course structure
+    const topicList = [];
+    for (const mod of course.modules || []) {
+        for (const t of mod.topics || []) {
+            const key = t.id || t._id?.toString();
+            if (key) topicList.push({ topicId: key, title: t.title, moduleTitle: mod.title });
+        }
+    }
+
+    const progressRecords = await Progress.find({ course: courseId })
+        .populate('student', 'name email').lean();
+
+    const TIERS = ['beginner', 'intermediate', 'advanced'];
+
+    const students = progressRecords.map(progress => {
+        // For each topic, find best score per tier
+        const tiersByTopic = {};
+
+        for (const s of (progress.topicQuizScores || [])) {
+            if (!s.difficultyTier || !s.isTeacherAssessment) continue;
+            if (!tiersByTopic[s.topicId]) tiersByTopic[s.topicId] = {};
+            const existing = tiersByTopic[s.topicId][s.difficultyTier];
+            if (!existing || s.score > existing.score) {
+                tiersByTopic[s.topicId][s.difficultyTier] = { score: s.score, passed: s.score >= 80 };
+            }
+        }
+
+        // Map to display format
+        const tiers = {};
+        for (const { topicId } of topicList) {
+            tiers[topicId] = {};
+            for (const tier of TIERS) {
+                const entry = tiersByTopic[topicId]?.[tier];
+                if (!entry) {
+                    tiers[topicId][tier] = null;
+                } else if (entry.passed) {
+                    tiers[topicId][tier] = { status: 'passed', score: entry.score };
+                } else {
+                    tiers[topicId][tier] = { status: 'attempted', score: entry.score };
+                }
+            }
+        }
+
+        return {
+            studentId: progress.student?._id || progress.student,
+            name: progress.student?.name || 'Unknown',
+            email: progress.student?.email || '',
+            tiers,
+        };
+    });
+
+    return { topics: topicList, students };
+}
+
+async function studyTimeTrend(courseId, fromDate, toDate) {
+    const from = new Date(fromDate + 'T00:00:00Z');
+    const to = new Date(toDate + 'T23:59:59Z');
+
+    // Build date array, max 90 days
+    const dates = [];
+    for (let d = new Date(from); d <= to && dates.length < 90; d.setDate(d.getDate() + 1)) {
+        dates.push(d.toISOString().slice(0, 10));
+    }
+
+    const progressRecords = await Progress.find({ course: courseId })
+        .populate('student', 'name')
+        .select('student dailyActivity totalTimeSpent')
+        .lean();
+
+    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const toLabel = (s) => { const [,m,d] = s.split('-'); return `${MONTHS[+m-1]} ${+d}`; };
+
+    const classDailyData = dates.map(date => {
+        let totalSeconds = 0, active = 0;
+        for (const p of progressRecords) {
+            const e = (p.dailyActivity || []).find(a => a.date === date);
+            if (e?.timeSpent > 0) { totalSeconds += e.timeSpent; active++; }
+        }
+        return { date, label: toLabel(date), hours: +(totalSeconds / 3600).toFixed(2), activeStudents: active };
+    });
+
+    const COLORS = ['#3b82f6','#8b5cf6','#ec4899','#f59e0b','#10b981','#ef4444','#06b6d4'];
+    const studentDailyData = progressRecords
+        .filter(p => p.student)
+        .map((p, i) => ({
+            studentId: p.student._id,
+            name: p.student.name,
+            color: COLORS[i % COLORS.length],
+            dailyData: dates.map(date => {
+                const e = (p.dailyActivity || []).find(a => a.date === date);
+                return { date, hours: +((e?.timeSpent || 0) / 3600).toFixed(2) };
+            }),
+            totalHours: +((p.totalTimeSpent || 0) / 3600).toFixed(1),
+        }));
+
+    return { classDailyData, studentDailyData, dateRange: { from: fromDate, to: toDate } };
+}
+
 module.exports = {
     classOverview,
     topicAnalysis,
@@ -867,4 +1058,7 @@ module.exports = {
     engagementAnalysis,
     topicProgressMatrix,
     teacherQuizResults,
+    tierDistribution,
+    studentTierMatrix,
+    studyTimeTrend,
 };

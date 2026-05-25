@@ -6,8 +6,8 @@ const { generateOTP, sendOTPEmail, sendPasswordResetEmail } = require('../servic
 const JWT_SECRET = process.env.JWT_SECRET;
 
 // Helper to create token
-const createToken = (id) => {
-    return jwt.sign({ id }, JWT_SECRET, { expiresIn: '7d' });
+const createToken = (id, role = '') => {
+    return jwt.sign({ id, role }, JWT_SECRET, { expiresIn: '7d' });
 };
 
 exports.register = async (req, res) => {
@@ -79,7 +79,7 @@ exports.login = async (req, res) => {
             return res.status(400).json({ error: 'Invalid credentials' });
         }
 
-        const token = createToken(user._id);
+        const token = createToken(user._id, user.role);
 
         // Update daily streak for students
         if (user.role === 'student') {
@@ -119,7 +119,7 @@ exports.verifyOtp = async (req, res) => {
         if (!user) return res.status(400).json({ error: 'User not found' });
 
         if (user.isEmailVerified) {
-            const token = createToken(user._id);
+            const token = createToken(user._id, user.role);
             return res.status(200).json({ success: true, message: 'Already verified', token, user: { id: user._id, role: user.role } });
         }
 
@@ -150,7 +150,7 @@ exports.verifyOtp = async (req, res) => {
         user.otpLockUntil = undefined;
         await user.save();
 
-        const token = createToken(user._id);
+        const token = createToken(user._id, user.role);
         res.json({ success: true, message: 'Email verified successfully', token, user: { id: user._id, role: user.role } });
 
     } catch (error) {

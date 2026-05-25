@@ -4,6 +4,7 @@
 // ============================================================================
 
 const axios = require('axios');
+const { TEACHER_PERSONA_SYSTEM } = require('../prompts/teacherPersona');
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const AI_MODEL = process.env.AI_MODEL || 'qwen/qwen3.5-9b';
@@ -29,8 +30,8 @@ IMPORTANT CONSTRAINTS:
 - Avoid repetitive questions
 `;
 
-// Helper: Call OpenRouter with Master Prompt
-async function callAI(userPrompt, maxTokens = 2000) {
+// Helper: Call OpenRouter with Master Prompt (or optional system override)
+async function callAI(userPrompt, maxTokens = 2000, systemPromptOverride = null) {
     if (!OPENROUTER_API_KEY) {
         throw new Error('OpenRouter API key not configured');
     }
@@ -41,7 +42,7 @@ async function callAI(userPrompt, maxTokens = 2000) {
             {
                 model: AI_MODEL,
                 messages: [
-                    { role: 'system', content: MASTER_SYSTEM_PROMPT },
+                    { role: 'system', content: systemPromptOverride || MASTER_SYSTEM_PROMPT },
                     { role: 'user', content: userPrompt }
                 ],
                 max_tokens: maxTokens,
@@ -78,24 +79,9 @@ function parseJSON(text) {
 // TASK 1: RESOURCE RECOMMENDATION
 // ============================================================================
 async function recommendResources(studentProfile) {
-    const prompt = `
-TASK: Resource Recommendation
+    const systemMsg = TEACHER_PERSONA_SYSTEM + `
 
-Student Profile:
-${JSON.stringify(studentProfile, null, 2)}
-
-Recommend 3-5 high-quality learning resources that match:
-- Student level
-- Topic relevance
-- Previous progress
-- Identified weaknesses
-
-Rules:
-- Prefer beginner-friendly resources if student score < 50%
-- Avoid recommending already completed resources
-- Rank by: Relevance, Difficulty match, Popularity
-
-Output Format (JSON only):
+OUTPUT FORMAT: Respond with ONLY valid JSON — no text before or after:
 {
   "recommended_resources": [
     {
@@ -103,13 +89,26 @@ Output Format (JSON only):
       "type": "video | article | pdf",
       "url": "https://...",
       "difficulty": "beginner | intermediate | advanced",
-      "reason": "Why this resource is recommended"
+      "reason": "One warm, jargon-free sentence that tells the student WHY this resource is worth their time — written as a teacher would say it out loud"
     }
   ]
 }`;
 
+    const prompt = `TASK: Resource Recommendation
+
+Student Profile:
+${JSON.stringify(studentProfile, null, 2)}
+
+Recommend 3-5 high-quality learning resources that match the student's level, topic, and identified weaknesses.
+
+Rules:
+- Prefer beginner-friendly resources if student score < 50%
+- Avoid resources the student has already completed
+- Rank by: Relevance, Difficulty match, Usefulness
+- For each resource, write the "reason" field as a teacher speaking directly to the student — one honest sentence explaining why THIS resource helps them right now`;
+
     try {
-        const response = await callAI(prompt);
+        const response = await callAI(prompt, 2000, systemMsg);
         return parseJSON(response);
     } catch (error) {
         console.error('Resource recommendation failed:', error);

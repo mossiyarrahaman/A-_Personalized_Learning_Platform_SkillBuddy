@@ -524,7 +524,40 @@ exports.updateCourseModules = async (req, res) => {
             return res.status(403).json({ error: 'Not authorized to update this course' });
         }
 
-        course.modules = modules;
+        // Snapshot quiz publish flags before overwriting modules.
+        // These are managed via /api/rag/publish-quiz-tier, not the curriculum editor,
+        // so they must be preserved across saves.
+        const existingTopicFlags = {};
+        for (const mod of course.modules) {
+            for (const t of mod.topics) {
+                const key = t.id || t._id?.toString();
+                if (key) {
+                    existingTopicFlags[key] = {
+                        quizPublished:             t.quizPublished             || false,
+                        quizPublishedBeginner:     t.quizPublishedBeginner     || false,
+                        quizPublishedIntermediate: t.quizPublishedIntermediate || false,
+                        quizPublishedAdvanced:     t.quizPublishedAdvanced     || false,
+                    };
+                }
+            }
+        }
+
+        const mergedModules = modules.map(mod => ({
+            ...mod,
+            topics: (mod.topics || []).map(t => {
+                const key = t.id || t._id?.toString();
+                const flags = existingTopicFlags[key] || {};
+                return {
+                    ...t,
+                    quizPublished:             flags.quizPublished             || t.quizPublished             || false,
+                    quizPublishedBeginner:     flags.quizPublishedBeginner     || t.quizPublishedBeginner     || false,
+                    quizPublishedIntermediate: flags.quizPublishedIntermediate || t.quizPublishedIntermediate || false,
+                    quizPublishedAdvanced:     flags.quizPublishedAdvanced     || t.quizPublishedAdvanced     || false,
+                };
+            }),
+        }));
+
+        course.modules = mergedModules;
         if (syllabus) course.syllabus = syllabus;
         if (title) course.title = title;
         if (description) course.description = description;
@@ -1066,6 +1099,15 @@ exports.submitAiPathQuiz = async (req, res) => {
         );
         if (!updatedProfile) return res.status(404).json({ error: 'Profile not found' });
 
+        // Single source of truth for stats.avgScore — weighted running average.
+        // updatedProfile.stats.quizzesTaken is already incremented by the $inc above.
+        {
+            const n = updatedProfile.stats?.quizzesTaken || 1;
+            const oldAvg = updatedProfile.stats?.avgScore || 0;
+            const newAvg = Math.round(((oldAvg * (n - 1)) + score) / n);
+            await StudentProfile.updateOne({ userId }, { $set: { 'stats.avgScore': newAvg } });
+        }
+
         // Level + badge dedup (atomic per-badge to prevent race condition duplicates)
         if (passed) {
             const newLevel = Math.floor((updatedProfile.points || 0) / 500) + 1;
@@ -1218,6 +1260,7 @@ exports.submitTopicQuiz = async (req, res) => {
             topicTitle: submittedTopicTitle,
             wrongQuestions = [],
             isTeacherAssessment = false,
+            difficultyTier = null,
         } = req.body;
         const userId = req.user.id;
 
@@ -1247,6 +1290,7 @@ exports.submitTopicQuiz = async (req, res) => {
             correctAnswers,
             passed,
             bloomLevel,
+            difficultyTier: difficultyTier || null,
             isTeacherAssessment: isTeacherAssessment || false,
             wrongQuestions: wrongQuestions.map(wq => ({
                 questionText: wq.questionText || wq.question || '',
@@ -1300,6 +1344,11 @@ exports.submitTopicQuiz = async (req, res) => {
             }
         }
 
+        progress.recordActivity({ quizTaken: true });
+        // Single authoritative risk computation — covers time, fail count, avg score, and completion rate
+        progress.computeRiskFlag(
+            courseDoc?.modules?.reduce((s, m) => s + (m.topics || []).length, 0) || 0
+        );
         await progress.save();
 
         // --- GAMIFICATION UPDATE ---
@@ -1320,6 +1369,15 @@ exports.submitTopicQuiz = async (req, res) => {
                 { upsert: true, new: true }
             );
             pointsAwarded = quizPts;
+
+            // Single source of truth for stats.avgScore — weighted running average.
+            // updated.stats.quizzesTaken is already incremented by the $inc above.
+            {
+                const n = updated.stats?.quizzesTaken || 1;
+                const oldAvg = updated.stats?.avgScore || 0;
+                const newAvg = Math.round(((oldAvg * (n - 1)) + score) / n);
+                await StudentProfile.updateOne({ userId }, { $set: { 'stats.avgScore': newAvg } });
+            }
 
             // Course completion bonus (+200)
             if (courseCompleted) {
@@ -1490,6 +1548,140 @@ exports.toggleExtraPathTopic = async (req, res) => {
 
     } catch (error) {
         console.error('Error toggling extra path topic:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+// ─── GET /api/courses/my-quiz-stats ──────────────────────────────────────────
+// Returns the authenticated student's full quiz history across all courses,
+// merged with AI-path quizzes stored in StudentProfile.quizHistory.
+
+exports.getMyQuizStats = async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        const [progressRecords, profile] = await Promise.all([
+            Progress.find({ student: userId }).select('topicQuizScores course').populate('course', 'title').lean(),
+            StudentProfile.findOne({ userId }).select('quizHistory').lean(),
+        ]);
+
+        const quizzes = [];
+
+        // Teacher-course quizzes (stored in Progress.topicQuizScores)
+        for (const p of progressRecords) {
+            for (const q of p.topicQuizScores || []) {
+                quizzes.push({
+                    topicId: q.topicId,
+                    topicTitle: q.topicTitle || 'Quiz',
+                    courseTitle: p.course?.title || '',
+                    score: q.score || 0,
+                    totalQuestions: q.totalQuestions || 0,
+                    correctAnswers: q.correctAnswers || 0,
+                    passed: q.passed || false,
+                    bloomLevel: q.bloomLevel || null,
+                    difficultyTier: q.difficultyTier || null,
+                    isTeacherAssessment: q.isTeacherAssessment || false,
+                    wrongQuestions: q.wrongQuestions || [],
+                    attemptDate: q.attemptDate ? new Date(q.attemptDate) : new Date(0),
+                });
+            }
+        }
+
+        // AI-path quizzes (stored in StudentProfile.quizHistory)
+        for (const q of profile?.quizHistory || []) {
+            quizzes.push({
+                topicId: null,
+                topicTitle: q.topicTitle || 'Quiz',
+                courseTitle: 'AI Learning Path',
+                score: q.score || 0,
+                totalQuestions: q.totalQuestions || 0,
+                correctAnswers: q.correctAnswers || 0,
+                passed: (q.score || 0) >= 70,
+                bloomLevel: q.bloomLevel || null,
+                difficultyTier: null,
+                isTeacherAssessment: false,
+                wrongQuestions: q.wrongQuestions || [],
+                attemptDate: q.attemptDate ? new Date(q.attemptDate) : new Date(0),
+            });
+        }
+
+        quizzes.sort((a, b) => b.attemptDate - a.attemptDate);
+
+        const avgScore = quizzes.length
+            ? Math.round(quizzes.reduce((s, q) => s + q.score, 0) / quizzes.length)
+            : 0;
+
+        res.json({ success: true, quizzes, quizzesTaken: quizzes.length, avgScore });
+    } catch (err) {
+        console.error('getMyQuizStats error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+// ─── POST /api/courses/save-quiz-result ──────────────────────────────────────
+// Saves an AI-path quiz result to StudentProfile.quizHistory for cross-device persistence.
+
+exports.saveQuizResultRecord = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { topicTitle, pct, score, total, bloomLevel, difficulty, mistakes, timeTaken } = req.body;
+
+        await StudentProfile.findOneAndUpdate(
+            { userId },
+            {
+                $push: {
+                    quizHistory: {
+                        topicTitle: topicTitle || 'Quiz',
+                        score: Math.round(pct || score || 0),
+                        totalQuestions: total || 0,
+                        correctAnswers: score || 0,
+                        bloomLevel: bloomLevel || '',
+                        difficulty: difficulty || '',
+                        wrongQuestions: mistakes || [],
+                        timeTaken: timeTaken || 0,
+                        attemptDate: new Date(),
+                    },
+                },
+            },
+            { upsert: true }
+        );
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('saveQuizResultRecord error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+// ─── GET /api/courses/:courseId/my-tier-scores ───────────────────────────────
+// Returns the authenticated student's tier quiz scores per topic for a course.
+// Used by TierQuizPanel to compute unlock state (beginner → intermediate → advanced).
+
+exports.getMyTierScores = async (req, res) => {
+    try {
+        const { courseId } = req.params;
+        const userId = req.user.id;
+
+        const progress = await Progress.findOne({ student: userId, course: courseId })
+            .select('topicQuizScores').lean();
+
+        if (!progress) return res.json({ success: true, byTopic: {} });
+
+        const byTopic = {};
+        for (const s of progress.topicQuizScores) {
+            if (!s.difficultyTier || !s.isTeacherAssessment) continue;
+            if (!byTopic[s.topicId]) byTopic[s.topicId] = [];
+            byTopic[s.topicId].push({
+                difficultyTier: s.difficultyTier,
+                score: s.score,
+                passed: s.score >= 80,
+                isTeacherAssessment: s.isTeacherAssessment,
+            });
+        }
+
+        res.json({ success: true, byTopic });
+    } catch (err) {
+        console.error('getMyTierScores error:', err);
         res.status(500).json({ error: 'Server error' });
     }
 };

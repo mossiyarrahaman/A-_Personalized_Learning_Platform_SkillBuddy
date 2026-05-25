@@ -68,6 +68,7 @@ const quizScoreSchema = new mongoose.Schema({
     correctAnswers: Number,
     passed: { type: Boolean, default: false },
     bloomLevel: { type: String, default: 'understand' },
+    difficultyTier: { type: String, enum: ['beginner', 'intermediate', 'advanced'], default: null },
     isTeacherAssessment: { type: Boolean, default: false },
     attempts: { type: Number, default: 1 },
     wrongQuestions: [wrongQuestionSchema],
@@ -207,5 +208,6 @@ progressSchema.methods.computeRiskFlag = function (totalTopicsInCourse) {
 progressSchema.index({ student: 1, course: 1 }, { unique: true });
 progressSchema.index({ course: 1, riskFlag: 1 });
 progressSchema.index({ course: 1, lastAccessed: -1 });
+progressSchema.index({ course: 1, 'topicQuizScores.difficultyTier': 1 });
 
 module.exports = mongoose.model('Progress', progressSchema);

@@ -25,6 +25,8 @@
 const { extractText, isSupportedFile } = require('../utils/extractText');
 const { chunkText } = require('../utils/chunkText');
 const ResourceChunk = require('../models/ResourceChunk');
+const embeddingService = require('./embeddingService');
+const Course = require('../models/Course');
 const crypto = require('crypto');
 
 // Minimum extractable text to consider a document useful (in characters)
@@ -101,6 +103,46 @@ async function ingestResource({ filePath, mimeType, fileName, courseId }) {
 
     await ResourceChunk.insertMany(documents);
     console.log(`  ✅ Stored ${documents.length} chunks for "${fileName}"\n`);
+
+    // ── Step 7: Generate embeddings asynchronously ───────────────────────────
+    // Non-blocking — teacher gets an instant response; embedding happens in background.
+    // If OPENAI_API_KEY is absent, this no-ops silently.
+    if (embeddingService.isAvailable()) {
+        setImmediate(async () => {
+            try {
+                const course = await Course.findById(courseId).select('title').lean();
+                const courseTitle = course?.title || '';
+                const savedChunks = await ResourceChunk.find({ fileId }).select('_id text').lean();
+
+                // Prepend course context to each chunk text before embedding.
+                // This "chunk enrichment" technique significantly improves retrieval
+                // accuracy for domain-specific content.
+                const textsToEmbed = savedChunks.map(c =>
+                    courseTitle ? `Course: ${courseTitle}\n\n${c.text}` : c.text
+                );
+
+                const embeddings = await embeddingService.embedTexts(textsToEmbed);
+
+                const bulkOps = savedChunks.map((c, i) => ({
+                    updateOne: {
+                        filter: { _id: c._id },
+                        update: {
+                            $set: {
+                                embedding: embeddings[i],
+                                embeddingModel: embeddingService.MODEL,
+                                embeddedAt: new Date(),
+                            },
+                        },
+                    },
+                }));
+
+                await ResourceChunk.bulkWrite(bulkOps);
+                console.log(`[Embedding] Embedded ${savedChunks.length} chunks for "${fileName}" (model: ${embeddingService.MODEL}, dims: ${embeddingService.DIMS})`);
+            } catch (err) {
+                console.error('[Embedding] Failed to embed chunks (non-fatal, BM25 still works):', err.message);
+            }
+        });
+    }
 
     return {
         fileId,
