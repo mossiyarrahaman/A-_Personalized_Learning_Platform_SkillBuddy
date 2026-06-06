@@ -3,6 +3,8 @@ import { X, Play, FileText, CheckCircle, Clock, Upload, ExternalLink, AlertTrian
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../api/axios';
 import ReactPlayer from 'react-player';
+import { getClientMeta } from '../utils/clientMeta';
+import MarkdownContent from './MarkdownContent';
 
 const ResourcePlayer = ({ resource, moduleId, topicId, onClose, onComplete }) => {
 
@@ -105,7 +107,8 @@ const ResourcePlayer = ({ resource, moduleId, topicId, onClose, onComplete }) =>
                 api.post('/courses/progress', {
                     moduleId, topicId, resourceId: resource._id || resource.id,
                     progress: isCompleted ? 100 : 0,
-                    timeSpent: delta
+                    timeSpent: delta,
+                    ...getClientMeta(),
                 }).catch(err => console.error("Sync failed", err));
                 lastSyncTime.current = currentSessionTime;
             }
@@ -124,7 +127,8 @@ const ResourcePlayer = ({ resource, moduleId, topicId, onClose, onComplete }) =>
                 await api.post('/courses/progress', {
                     moduleId, topicId, resourceId: resource._id || resource.id,
                     progress: completedStatus ? 100 : 0,
-                    timeSpent: delta
+                    timeSpent: delta,
+                    ...getClientMeta(),
                 });
                 lastSyncTime.current = currentSessionTime;
             } catch (error) {
@@ -286,8 +290,10 @@ const ResourcePlayer = ({ resource, moduleId, topicId, onClose, onComplete }) =>
                             <div className="p-8 flex items-center justify-center h-full">
                                 <div className="max-w-2xl text-center bg-white p-8 rounded-2xl shadow-lg">
                                     <h1 className="text-2xl font-bold mb-4 text-gray-800">{resource.title}</h1>
-                                    <div className="prose prose-lg text-gray-700 whitespace-pre-wrap text-left">
-                                        {resource.content || "No content available."}
+                                    <div className="text-left">
+                                        {resource.content
+                                            ? <MarkdownContent content={resource.content} />
+                                            : <p className="text-gray-500">No content available.</p>}
                                     </div>
                                 </div>
                             </div>

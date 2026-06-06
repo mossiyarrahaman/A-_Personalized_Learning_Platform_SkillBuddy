@@ -7,6 +7,8 @@ import ResourcePlayer from '../components/ResourcePlayer';
 import QuizModal from '../components/QuizModal';
 import ClassChat from '../components/ClassChat';
 import TierQuizPanel from '../components/TierQuizPanel';
+import TutorPromptInput from '../components/TutorPromptInput';
+import TutorChat from '../components/TutorChat';
 import { useAppTheme } from '../hooks/useAppTheme';
 import { useAuth } from '../context/AuthContext';
 
@@ -28,6 +30,7 @@ const ClassView = () => {
     const [tierScores, setTierScores] = useState({});
     const [expandedTierTopic, setExpandedTierTopic] = useState(null);
     const [chatOpen, setChatOpen] = useState(false);
+    const [tutorCtx, setTutorCtx] = useState(null);
 
     // Module-level tests + assignments
     const [moduleTests, setModuleTests] = useState({});
@@ -547,6 +550,18 @@ const ClassView = () => {
                                                                         </>
                                                                     );
                                                                 })()}
+
+                                                                {/* Tutor entry point */}
+                                                                <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${theme.border}` }}>
+                                                                    <TutorPromptInput
+                                                                        topicTitle={topic.title || ''}
+                                                                        topicId={topic._id || topic.id}
+                                                                        moduleId={module._id}
+                                                                        courseId={courseId}
+                                                                        pathId={null}
+                                                                        onOpenTutor={(ctx) => setTutorCtx(ctx)}
+                                                                    />
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     );
@@ -673,6 +688,13 @@ const ClassView = () => {
                     onClose={() => setChatOpen(false)}
                 />
             )}
+
+            <TutorChat
+                isOpen={!!tutorCtx}
+                onClose={() => setTutorCtx(null)}
+                newSessionContext={tutorCtx}
+                sessionId={null}
+            />
         </div>
     );
 };

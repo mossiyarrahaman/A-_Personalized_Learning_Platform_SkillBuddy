@@ -3,10 +3,11 @@ import {
     Check, Lock, ChevronDown, ChevronUp, BookOpen,
     ArrowRight, CheckCircle2, Star,
     Target, TrendingUp, Brain,
-    Flag, Wrench
+    Flag, Wrench, MessageCircle
 } from 'lucide-react';
 import { useAppTheme } from '../hooks/useAppTheme';
 import QuizModal from './QuizModal';
+import TutorPromptInput from './TutorPromptInput';
 
 
 
@@ -28,8 +29,9 @@ const inferDifficulty = (module, index) => {
 };
 
 // ─── Topic List Item ──────────────────────────────────────────────────────────
-const TopicListItem = ({ topic, moduleId, moduleStatus, diffConfig, onTopicClick, onTopicToggle, onQuizComplete, theme, index }) => {
+const TopicListItem = ({ topic, moduleId, moduleStatus, diffConfig, onTopicClick, onTopicToggle, onQuizComplete, onOpenTutor, theme, index }) => {
     const [quizOpen, setQuizOpen] = useState(false);
+    const [showTutorInput, setShowTutorInput] = useState(false);
 
     // Locked only if the parent module is locked; pending topics in unlocked modules are accessible
     const isLocked = moduleStatus === 'locked';
@@ -103,6 +105,24 @@ const TopicListItem = ({ topic, moduleId, moduleStatus, diffConfig, onTopicClick
                             >
                                 <Brain size={10} /> Quiz
                             </button>
+                            {onOpenTutor && (
+                                <button
+                                    onClick={e => { e.stopPropagation(); setShowTutorInput(p => !p); }}
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: '3px',
+                                        padding: '3px 7px', borderRadius: '6px',
+                                        border: `1px solid ${showTutorInput ? diffConfig.border : theme.border}`,
+                                        background: showTutorInput ? diffConfig.bg : 'none',
+                                        color: showTutorInput ? diffConfig.color : theme.textMuted,
+                                        cursor: 'pointer', fontSize: '10px', fontWeight: 600,
+                                        transition: 'all .15s', whiteSpace: 'nowrap'
+                                    }}
+                                    onMouseEnter={e => { if (!showTutorInput) { e.currentTarget.style.borderColor = diffConfig.color; e.currentTarget.style.color = diffConfig.color; }}}
+                                    onMouseLeave={e => { if (!showTutorInput) { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.color = theme.textMuted; }}}
+                                >
+                                    <MessageCircle size={10} /> Tutor
+                                </button>
+                            )}
                             <button
                                 onClick={openDetail}
                                 style={{
@@ -162,6 +182,20 @@ const TopicListItem = ({ topic, moduleId, moduleStatus, diffConfig, onTopicClick
                         ))}
                     </div>
                 )}
+
+                {/* Inline tutor prompt */}
+                {showTutorInput && onOpenTutor && (
+                    <div style={{ marginTop: '12px' }}>
+                        <TutorPromptInput
+                            topicTitle={topic.title || ''}
+                            topicId={topic.id || topic._id}
+                            moduleId={moduleId}
+                            courseId={null}
+                            pathId={null}
+                            onOpenTutor={(ctx) => { setShowTutorInput(false); onOpenTutor(ctx); }}
+                        />
+                    </div>
+                )}
             </div>
 
             {quizOpen && (
@@ -185,7 +219,7 @@ const TopicListItem = ({ topic, moduleId, moduleStatus, diffConfig, onTopicClick
 };
 
 // ─── Phase Card ───────────────────────────────────────────────────────────────
-const PhaseCard = ({ module, index, phaseNumber, onTopicClick, onTopicToggle, onQuizComplete, theme }) => {
+const PhaseCard = ({ module, index, phaseNumber, onTopicClick, onTopicToggle, onQuizComplete, onOpenTutor, theme }) => {
     const diffKey = inferDifficulty(module, index);
     const diff = DIFFICULTY_CONFIG[diffKey];
     const [expanded, setExpanded] = useState(
@@ -319,6 +353,7 @@ const PhaseCard = ({ module, index, phaseNumber, onTopicClick, onTopicToggle, on
                                     onTopicClick={onTopicClick}
                                     onTopicToggle={onTopicToggle}
                                     onQuizComplete={onQuizComplete}
+                                    onOpenTutor={onOpenTutor}
                                     theme={theme}
                                 />
                             ))
@@ -401,7 +436,7 @@ const PhaseConnector = ({ nextDiffKey }) => {
 };
 
 // ─── Main RoadmapTree ─────────────────────────────────────────────────────────
-const RoadmapTree = ({ modules = [], courseName = '', showHeader = true, onTopicClick, onTopicToggle, onQuizComplete }) => {
+const RoadmapTree = ({ modules = [], courseName = '', showHeader = true, onTopicClick, onTopicToggle, onQuizComplete, onOpenTutor }) => {
     const { theme, accent } = useAppTheme();
     const aGrad = `linear-gradient(135deg,${accent.from},${accent.to})`;
 
@@ -470,6 +505,7 @@ const RoadmapTree = ({ modules = [], courseName = '', showHeader = true, onTopic
                                 onTopicClick={onTopicClick}
                                 onTopicToggle={onTopicToggle}
                                 onQuizComplete={onQuizComplete}
+                                onOpenTutor={onOpenTutor}
                                 theme={theme}
                             />
                             {/* Connector between phases */}

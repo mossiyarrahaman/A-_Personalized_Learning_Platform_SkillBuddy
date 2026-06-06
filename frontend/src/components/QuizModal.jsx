@@ -3,10 +3,13 @@ import {
     X, Brain, CheckCircle, XCircle, ChevronRight,
     RotateCcw, Clock, Loader, BookOpen, AlertCircle
 } from 'lucide-react';
+import { getClientMeta } from '../utils/clientMeta';
+import { emitAnalyticsChanged } from '../utils/analyticsEvents';
 import api from '../api/axios';
 import { useAppTheme } from '../hooks/useAppTheme';
 import { saveQuizResult } from '../utils/quizStorage';
 import { TIER_CONFIG, TIERS, TIER_DEFAULT_BLOOM } from '../utils/tierUtils';
+import { openReflection } from '../hooks/useReflectionPrompt';
 
 const BLOOM_LEVELS = [
     { key: 'remember',   label: 'Remember',   desc: 'Recall facts & definitions' },
@@ -283,15 +286,20 @@ const QuizModal = ({
                     bloomLevel: m.bloomLevel || bloom,
                     difficulty: m.difficulty || 'medium',
                 })),
+                ...getClientMeta(),
             }).then(res => {
                 if (res.data?.pointsAwarded > 0) {
                     window.dispatchEvent(new CustomEvent('points-updated', { detail: { points: res.data.pointsAwarded } }));
                 }
+                if (res.data?.firstCompletion) {
+                    openReflection({ courseId, pathId: null, moduleId, topicId, topicTitle });
+                }
             }).catch(err => console.warn('[QuizModal] Backend save failed:', err.message));
         }
 
-        // Notify analytics page to reload
+        // Notify analytics page to reload (storage event for legacy listener + custom event)
         window.dispatchEvent(new StorageEvent('storage', { key: 'sb_quiz_results_' }));
+        emitAnalyticsChanged('quiz_submitted');
 
         onComplete?.(resultData);
     };

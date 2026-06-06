@@ -2,6 +2,7 @@ const Course = require('../models/Course');
 const StudentProfile = require('../models/StudentProfile');
 const Progress = require('../models/Progress');
 const User = require('../models/User'); // Added User model
+const Reflection = require('../models/Reflection');
 const aiService = require('../services/ai-service');
 const { retrieveRelevantChunks } = require('../services/retrievalService');
 
@@ -110,6 +111,8 @@ exports.toggleTopicComplete = async (req, res) => {
         const topicDoc = moduleDoc.topics.find(t => t.id === topicId || t._id.toString() === topicId);
         if (!topicDoc) return res.status(404).json({ error: 'Topic not found' });
 
+        const wasCompleted = topicDoc.status === 'completed';
+
         // Update status
         topicDoc.status = status;
 
@@ -137,7 +140,7 @@ exports.toggleTopicComplete = async (req, res) => {
         profile.markModified('currentPath');
         await profile.save();
         await refreshStreak(userId);
-        res.json({ success: true, topic: topicDoc });
+        res.json({ success: true, topic: topicDoc, firstCompletion: status === 'completed' && !wasCompleted });
 
     } catch (error) {
         console.error("Error toggling topic:", error);
@@ -349,6 +352,28 @@ exports.getTopicDetails = async (req, res) => {
             }
         }
 
+        // If AI Path and topic guide not yet generated, build it now (lazy generation)
+        if (contextType === 'ai_path' && !topicDoc.content) {
+            const profileG = await StudentProfile.findOne({ userId });
+            const pathIdG = req.query.pathId;
+            const containerG = resolvePathContainer(profileG, pathIdG);
+            if (containerG) {
+                const moduleDocG = containerG.modules.find(m => m.id === moduleId || m._id.toString() === moduleId);
+                const topicToUpdate = moduleDocG?.topics.find(t => t.id === topicId || t._id.toString() === topicId);
+                if (topicToUpdate && !topicToUpdate.content) {
+                    const field = containerG.onboarding?.field || profileG.onboarding.field;
+                    const level = containerG.onboarding?.level || profileG.onboarding.level;
+                    console.log(`Generating topic guide for: ${topicToUpdate.title}`);
+                    topicToUpdate.content = await aiService.generateTopicGuide(
+                        field, level, topicToUpdate.title, topicToUpdate.description || ''
+                    );
+                    profileG.markModified(pathIdG ? 'paths' : 'currentPath');
+                    await profileG.save();
+                    topicDoc = topicToUpdate;
+                }
+            }
+        }
+
         res.json({ topic: topicDoc });
 
     } catch (error) {
@@ -359,7 +384,7 @@ exports.getTopicDetails = async (req, res) => {
 
 exports.updateResourceProgress = async (req, res) => {
     try {
-        const { moduleId, topicId, resourceId, progress, timeSpent, lastPosition, pathId } = req.body;
+        const { moduleId, topicId, resourceId, progress, timeSpent, lastPosition, pathId, tzOffsetMinutes } = req.body;
         const userId = req.user.id;
         if (typeof progress !== 'number' || progress < 0 || progress > 100) {
             return res.status(400).json({ error: 'progress must be a number between 0 and 100' });
@@ -439,6 +464,7 @@ exports.updateResourceProgress = async (req, res) => {
                 progressRecord.recordActivity({
                     timeSpent: timeSpent || 0,
                     resourceCompleted: progress === 100,
+                    tzOffsetMinutes: tzOffsetMinutes || 0,
                 });
                 // +1 pt per complete 5-minute (300s) block newly crossed
                 const studyPts = Math.floor((progressRecord.totalTimeSpent || 0) / 300) - Math.floor(prevTotal / 300);
@@ -923,7 +949,7 @@ exports.selfEnrollStudent = async (req, res) => {
 // Update Class Progress (Topic Completion)
 exports.updateClassProgress = async (req, res) => {
     try {
-        const { courseId, topicId, completed } = req.body;
+        const { courseId, topicId, completed, tzOffsetMinutes } = req.body;
         const userId = req.user.id;
 
         let progress;
@@ -957,7 +983,7 @@ exports.updateClassProgress = async (req, res) => {
             if (!progress) return res.status(404).json({ error: 'Progress record not found' });
         }
 
-        progress.recordActivity({ topicCompleted: completed === true });
+        progress.recordActivity({ topicCompleted: completed === true, tzOffsetMinutes: tzOffsetMinutes || 0 });
         await progress.save();
 
         if (courseCompleted) {
@@ -1099,12 +1125,24 @@ exports.submitAiPathQuiz = async (req, res) => {
         );
         if (!updatedProfile) return res.status(404).json({ error: 'Profile not found' });
 
-        // Single source of truth for stats.avgScore — weighted running average.
-        // updatedProfile.stats.quizzesTaken is already incremented by the $inc above.
+        // Cross-course aggregate: pull from BOTH teacher-course quizzes
+        // (Progress.topicQuizScores) AND AI-path quizzes
+        // (StudentProfile.quizHistory). This mirrors the read-side merge
+        // in getMyQuizStats so the persisted value matches what students
+        // see on their analytics page.
         {
-            const n = updatedProfile.stats?.quizzesTaken || 1;
-            const oldAvg = updatedProfile.stats?.avgScore || 0;
-            const newAvg = Math.round(((oldAvg * (n - 1)) + score) / n);
+            const [allProgressDocs, profileForAvg] = await Promise.all([
+                Progress.find({ student: userId }).select('topicQuizScores').lean(),
+                StudentProfile.findOne({ userId }).select('quizHistory').lean(),
+            ]);
+            const courseScores = allProgressDocs.flatMap(p =>
+                (p.topicQuizScores || []).map(q => q.score)
+            );
+            const aiPathScores = (profileForAvg?.quizHistory || []).map(q => q.score);
+            const allScores = [...courseScores, ...aiPathScores];
+            const newAvg = allScores.length
+                ? Math.round(allScores.reduce((s, v) => s + v, 0) / allScores.length)
+                : 0;
             await StudentProfile.updateOne({ userId }, { $set: { 'stats.avgScore': newAvg } });
         }
 
@@ -1130,6 +1168,7 @@ exports.submitAiPathQuiz = async (req, res) => {
 
         // Reload full profile for embedded currentPath mutation
         const pathProfile = await StudentProfile.findOne({ userId });
+        let firstCompletion = false;
 
         // Mark topic completed on AI path
         if (passed && pathProfile) {
@@ -1137,6 +1176,7 @@ exports.submitAiPathQuiz = async (req, res) => {
             if (moduleDoc) {
                 const topicDoc = moduleDoc.topics.find(t => t.id === topicId || t._id.toString() === topicId);
                 if (topicDoc) {
+                    if (topicDoc.status !== 'completed') firstCompletion = true;
                     topicDoc.status = 'completed';
                     if (moduleDoc.topics.every(t => t.status === 'completed')) {
                         moduleDoc.status = 'completed';
@@ -1161,7 +1201,7 @@ exports.submitAiPathQuiz = async (req, res) => {
         }
 
         await refreshStreak(userId);
-        res.json({ success: true, passed, points: updatedProfile.points, pointsAwarded: passed ? 50 : 10, stats: updatedProfile.stats });
+        res.json({ success: true, passed, firstCompletion, points: updatedProfile.points, pointsAwarded: passed ? 50 : 10, stats: updatedProfile.stats });
 
     } catch (error) {
         console.error('Error submitting AI path quiz:', error);
@@ -1261,6 +1301,7 @@ exports.submitTopicQuiz = async (req, res) => {
             wrongQuestions = [],
             isTeacherAssessment = false,
             difficultyTier = null,
+            tzOffsetMinutes = 0,
         } = req.body;
         const userId = req.user.id;
 
@@ -1315,6 +1356,7 @@ exports.submitTopicQuiz = async (req, res) => {
         const topicDoc = moduleDoc?.topics?.id(topicId);
 
         let courseCompleted = false;
+        const wasAlreadyCompleted = progress.completedTopics.includes(topicId);
 
         if (isTeacherAssessment && score >= 80) {
             // Teacher quiz gate: scoring ≥ 80% marks topic complete without resource requirement
@@ -1344,7 +1386,7 @@ exports.submitTopicQuiz = async (req, res) => {
             }
         }
 
-        progress.recordActivity({ quizTaken: true });
+        progress.recordActivity({ quizTaken: true, tzOffsetMinutes });
         // Single authoritative risk computation — covers time, fail count, avg score, and completion rate
         progress.computeRiskFlag(
             courseDoc?.modules?.reduce((s, m) => s + (m.topics || []).length, 0) || 0
@@ -1370,12 +1412,24 @@ exports.submitTopicQuiz = async (req, res) => {
             );
             pointsAwarded = quizPts;
 
-            // Single source of truth for stats.avgScore — weighted running average.
-            // updated.stats.quizzesTaken is already incremented by the $inc above.
+            // Cross-course aggregate: pull from BOTH teacher-course quizzes
+            // (Progress.topicQuizScores) AND AI-path quizzes
+            // (StudentProfile.quizHistory). This mirrors the read-side merge
+            // in getMyQuizStats so the persisted value matches what students
+            // see on their analytics page.
             {
-                const n = updated.stats?.quizzesTaken || 1;
-                const oldAvg = updated.stats?.avgScore || 0;
-                const newAvg = Math.round(((oldAvg * (n - 1)) + score) / n);
+                const [allProgressDocs, profileForAvg] = await Promise.all([
+                    Progress.find({ student: userId }).select('topicQuizScores').lean(),
+                    StudentProfile.findOne({ userId }).select('quizHistory').lean(),
+                ]);
+                const courseScores = allProgressDocs.flatMap(p =>
+                    (p.topicQuizScores || []).map(q => q.score)
+                );
+                const aiPathScores = (profileForAvg?.quizHistory || []).map(q => q.score);
+                const allScores = [...courseScores, ...aiPathScores];
+                const newAvg = allScores.length
+                    ? Math.round(allScores.reduce((s, v) => s + v, 0) / allScores.length)
+                    : 0;
                 await StudentProfile.updateOne({ userId }, { $set: { 'stats.avgScore': newAvg } });
             }
 
@@ -1415,8 +1469,9 @@ exports.submitTopicQuiz = async (req, res) => {
             console.error('Error updating gamification stats:', statsError);
         }
 
+        const firstCompletion = !wasAlreadyCompleted && progress.completedTopics.includes(topicId);
         await refreshStreak(userId);
-        res.json({ success: true, passed, topicCompleted: progress.completedTopics.includes(topicId), courseCompleted, pointsAwarded });
+        res.json({ success: true, passed, topicCompleted: progress.completedTopics.includes(topicId), courseCompleted, firstCompletion, pointsAwarded });
 
     } catch (error) {
         console.error("Error submitting quiz:", error);
@@ -1682,6 +1737,407 @@ exports.getMyTierScores = async (req, res) => {
         res.json({ success: true, byTopic });
     } catch (err) {
         console.error('getMyTierScores error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+// ─── Teacher: top-3 at-risk students for a course ────────────────────────────
+
+exports.getStudentsNeedingAttention = async (req, res) => {
+    try {
+        const { courseId } = req.params;
+        const teacherId = req.user.id;
+
+        const [course, progressDocs] = await Promise.all([
+            Course.findById(courseId).select('author modules').lean(),
+            Progress.find({ course: courseId })
+                .populate('student', 'name email')
+                .select('student completedTopics topicQuizScores avgQuizScore lastAccessed enrollmentDate')
+                .lean(),
+        ]);
+
+        if (!course) return res.status(404).json({ error: 'Course not found' });
+        if (course.author.toString() !== teacherId) {
+            return res.status(403).json({ error: 'Not authorized' });
+        }
+        if (progressDocs.length === 0) {
+            return res.json({ success: true, students: [] });
+        }
+
+        const totalTopicsInCourse = (course.modules || []).reduce(
+            (sum, m) => sum + (m.topics?.length || 0), 0
+        );
+
+        const now = Date.now();
+
+        const scored = progressDocs.map(p => {
+            // Inactivity score
+            const lastMs = p.lastAccessed ? new Date(p.lastAccessed).getTime() : 0;
+            const daysSinceLast = (now - lastMs) / 86400000;
+            let inactivityScore;
+            if (daysSinceLast > 14)     inactivityScore = 40;
+            else if (daysSinceLast > 7) inactivityScore = 25;
+            else if (daysSinceLast > 4) inactivityScore = 10;
+            else                        inactivityScore = 0;
+
+            // Quiz failure score — last 5 by attemptDate desc
+            const allQuizzes = (p.topicQuizScores || []);
+            const last5 = allQuizzes
+                .slice()
+                .sort((a, b) => new Date(b.attemptDate) - new Date(a.attemptDate))
+                .slice(0, 5);
+            const failCount = last5.filter(q => !q.passed).length;
+            let failureScore;
+            if (failCount >= 4)      failureScore = 35;
+            else if (failCount >= 3) failureScore = 25;
+            else if (failCount >= 2) failureScore = 12;
+            else                     failureScore = 0;
+
+            // Avg score penalty (skip if no quiz history)
+            let avgScore_penalty = 0;
+            if (allQuizzes.length > 0) {
+                const avg = p.avgQuizScore || 0;
+                if (avg < 40)      avgScore_penalty = 20;
+                else if (avg < 55) avgScore_penalty = 10;
+                else if (avg < 70) avgScore_penalty = 4;
+            }
+
+            // Pace score
+            const completedCount = p.completedTopics?.length || 0;
+            const completionRate = totalTopicsInCourse > 0 ? completedCount / totalTopicsInCourse : 0;
+            const enrolledMs = p.enrollmentDate ? new Date(p.enrollmentDate).getTime() : 0;
+            const daysSinceEnrolled = (now - enrolledMs) / 86400000;
+            const expectedRate = Math.min(1, daysSinceEnrolled / 30);
+            let paceScore = 0;
+            if (daysSinceEnrolled > 7) {
+                if (completionRate < expectedRate * 0.4)      paceScore = 15;
+                else if (completionRate < expectedRate * 0.6) paceScore = 7;
+            }
+
+            return {
+                p,
+                attentionScore: inactivityScore + failureScore + avgScore_penalty + paceScore,
+                inactivityScore,
+                failureScore,
+                avgScore_penalty,
+                paceScore,
+                daysSinceLast: Math.floor(daysSinceLast),
+                daysSinceEnrolled: Math.floor(daysSinceEnrolled),
+                failCount,
+                completedCount,
+            };
+        });
+
+        const top3 = scored
+            .filter(s => s.attentionScore > 0)
+            .sort((a, b) => b.attentionScore - a.attentionScore)
+            .slice(0, 3);
+
+        const students = top3.map(({
+            p, attentionScore,
+            inactivityScore, failureScore, avgScore_penalty, paceScore,
+            daysSinceLast, daysSinceEnrolled, failCount, completedCount,
+        }) => {
+            // Dominant signal (earlier in list wins ties)
+            const signals = [
+                { name: 'inactivity', score: inactivityScore },
+                { name: 'failure',    score: failureScore },
+                { name: 'avg',        score: avgScore_penalty },
+                { name: 'pace',       score: paceScore },
+            ];
+            const dominant = signals.reduce((max, s) => s.score > max.score ? s : max, signals[0]);
+
+            // Reason sentence
+            let reason;
+            if (dominant.name === 'inactivity') {
+                if (daysSinceLast >= 7) {
+                    reason = `Hasn't logged in for ${daysSinceLast} days`;
+                } else {
+                    const d = p.lastAccessed
+                        ? new Date(p.lastAccessed).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                        : 'a while ago';
+                    reason = `Hasn't been active since ${d}`;
+                }
+            } else if (dominant.name === 'failure') {
+                reason = failCount >= 5
+                    ? 'Failed all 5 recent quizzes'
+                    : `Failed ${failCount} of last 5 quizzes`;
+            } else if (dominant.name === 'avg') {
+                const avg = p.avgQuizScore || 0;
+                reason = avg < 40
+                    ? `Quiz average is only ${avg}%`
+                    : `Quiz average has dropped to ${avg}%`;
+            } else {
+                reason = `Only ${completedCount}/${totalTopicsInCourse} topics done after ${daysSinceEnrolled} days`;
+            }
+
+            // Severity
+            let severity;
+            if (attentionScore >= 50)      severity = 'critical';
+            else if (attentionScore >= 25) severity = 'at_risk';
+            else                           severity = 'needs_followup';
+
+            // Action hint
+            const ACTION_HINTS = {
+                inactivity: 'Send a voice note to check in',
+                failure:    'Review their recent quiz attempts',
+                avg:        'Their quiz average needs attention',
+                pace:       "They're falling behind schedule",
+            };
+
+            return {
+                studentId:      p.student._id,
+                name:           p.student.name,
+                reason,
+                severity,
+                lastActiveAt:   p.lastAccessed || null,
+                completedTopics: completedCount,
+                totalTopics:    totalTopicsInCourse,
+                avgQuizScore:   p.avgQuizScore || 0,
+                actionHint:     ACTION_HINTS[dominant.name],
+            };
+        });
+
+        res.json({ success: true, students });
+    } catch (err) {
+        console.error('getStudentsNeedingAttention error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+// ============================================================================
+// RESUME TARGET — GET /api/courses/resume-target
+// Returns the single most-recently-touched topic for the logged-in student.
+// ============================================================================
+
+function findActiveAiTopic(modules) {
+    for (const m of (modules || [])) {
+        if (m.status === 'locked') continue;
+        const unlocked = (m.topics || []).find(t => t.status === 'unlocked');
+        if (unlocked) return { topic: unlocked, module: m };
+    }
+    // fallback: first topic of first non-locked module (handles all-completed case)
+    for (const m of (modules || [])) {
+        if (m.status === 'locked') continue;
+        if (m.topics?.length) return { topic: m.topics[0], module: m };
+    }
+    return { topic: null, module: null };
+}
+
+exports.getResumeTarget = async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        const [profile, progressDocs] = await Promise.all([
+            StudentProfile.findOne({ userId })
+                .select('currentPath paths lastActiveDate onboarding')
+                .lean(),
+            Progress.find({ student: userId })
+                .select('course lastAccessed topicQuizScores resourceProgress completedTopics')
+                .lean(),
+        ]);
+
+        if (!profile) return res.json({ success: true, resume: null });
+
+        const candidates = [];
+
+        // ── Source 1: currentPath ────────────────────────────────────────────
+        if (profile.currentPath?.modules?.length) {
+            const { topic, module: mod } = findActiveAiTopic(profile.currentPath.modules);
+            if (topic && mod) {
+                const ts = profile.lastActiveDate ? new Date(profile.lastActiveDate).getTime() : 0;
+                const totalRes = (topic.resources || []).length;
+                const completedRes = (topic.resources || []).filter(r => r.completed).length;
+                const progressPercent = totalRes > 0
+                    ? Math.round(completedRes / totalRes * 100)
+                    : (topic.status === 'completed' ? 100 : 0);
+                const mid = mod.id || mod._id?.toString();
+                const tid = topic.id || topic._id?.toString();
+                candidates.push({
+                    kind: 'ai_path', courseId: null, pathId: null,
+                    moduleId: mid, topicId: tid,
+                    topicTitle: topic.title || 'Topic',
+                    moduleTitle: mod.title || 'Module',
+                    pathOrCourseTitle: profile.onboarding?.field || 'Learning Path',
+                    progressPercent,
+                    lastTouchedAt: new Date(ts || Date.now()).toISOString(),
+                    deeplink: `/ai-course/module/${mid}/topic/${tid}`,
+                    _ts: ts,
+                });
+            }
+        }
+
+        // ── Source 2: extra paths ────────────────────────────────────────────
+        for (const path of (profile.paths || [])) {
+            if (!path.modules?.length) continue;
+            const { topic, module: mod } = findActiveAiTopic(path.modules);
+            if (!topic || !mod) continue;
+            const ts = path.generatedAt ? new Date(path.generatedAt).getTime() : 0;
+            const totalRes = (topic.resources || []).length;
+            const completedRes = (topic.resources || []).filter(r => r.completed).length;
+            const progressPercent = totalRes > 0
+                ? Math.round(completedRes / totalRes * 100)
+                : 0;
+            candidates.push({
+                kind: 'ai_path', courseId: null,
+                pathId: path._id?.toString(),
+                moduleId: mod.id || mod._id?.toString(),
+                topicId: topic.id || topic._id?.toString(),
+                topicTitle: topic.title || 'Topic',
+                moduleTitle: mod.title || 'Module',
+                pathOrCourseTitle: path.onboarding?.field || 'Extra Path',
+                progressPercent,
+                lastTouchedAt: new Date(ts || Date.now()).toISOString(),
+                deeplink: `/ai-path/${path._id}`,
+                _ts: ts,
+            });
+        }
+
+        // ── Sources 3+: teacher courses ──────────────────────────────────────
+        for (const prog of progressDocs) {
+            if (!prog.course) continue;
+            let ts = prog.lastAccessed ? new Date(prog.lastAccessed).getTime() : 0;
+            let targetTopicId = null;
+            let targetModuleId = null;
+
+            if (prog.topicQuizScores?.length) {
+                const sorted = [...prog.topicQuizScores].sort((a, b) =>
+                    new Date(b.attemptDate) - new Date(a.attemptDate)
+                );
+                const latest = sorted[0];
+                targetTopicId = latest.topicId;
+                targetModuleId = latest.moduleId;
+                const latestTs = latest.attemptDate ? new Date(latest.attemptDate).getTime() : 0;
+                if (latestTs > ts) ts = latestTs;
+            }
+
+            if (ts > 0) {
+                candidates.push({
+                    kind: 'teacher_course',
+                    courseId: prog.course.toString(),
+                    pathId: null,
+                    _targetTopicId: targetTopicId,
+                    _targetModuleId: targetModuleId,
+                    _prog: prog,
+                    lastTouchedAt: new Date(ts).toISOString(),
+                    _ts: ts,
+                });
+            }
+        }
+
+        if (!candidates.length) return res.json({ success: true, resume: null });
+
+        candidates.sort((a, b) => b._ts - a._ts);
+        const winner = candidates[0];
+
+        if (winner.kind !== 'teacher_course') {
+            const { _ts, ...out } = winner;
+            return res.json({ success: true, resume: out });
+        }
+
+        // Winner is a teacher course — load the Course doc for topic details
+        const courseDoc = await Course.findById(winner.courseId).select('title modules').lean();
+        if (!courseDoc) return res.json({ success: true, resume: null });
+
+        const prog = winner._prog;
+        let moduleDoc = null, topicDoc = null;
+
+        if (winner._targetTopicId) {
+            outer1: for (const m of (courseDoc.modules || [])) {
+                for (const t of (m.topics || [])) {
+                    if (t._id?.toString() === winner._targetTopicId || t.id === winner._targetTopicId) {
+                        moduleDoc = m; topicDoc = t; break outer1;
+                    }
+                }
+            }
+        }
+
+        // fallback: first incomplete topic
+        if (!topicDoc) {
+            const done = new Set(prog.completedTopics || []);
+            outer2: for (const m of (courseDoc.modules || [])) {
+                for (const t of (m.topics || [])) {
+                    if (!done.has(t._id?.toString())) {
+                        moduleDoc = m; topicDoc = t; break outer2;
+                    }
+                }
+            }
+        }
+
+        if (!topicDoc || !moduleDoc) return res.json({ success: true, resume: null });
+
+        const topicId = topicDoc._id?.toString();
+        const moduleId = moduleDoc._id?.toString();
+        const topicResourceIds = new Set(
+            (topicDoc.resources || []).map(r => r._id?.toString()).filter(Boolean)
+        );
+        const completedForTopic = (prog.resourceProgress || []).filter(
+            rp => topicResourceIds.has(rp.resourceId) && rp.completed
+        ).length;
+        const progressPercent = topicResourceIds.size > 0
+            ? Math.round(completedForTopic / topicResourceIds.size * 100)
+            : 0;
+
+        return res.json({
+            success: true,
+            resume: {
+                kind: 'teacher_course',
+                courseId: winner.courseId,
+                pathId: null,
+                moduleId,
+                topicId,
+                topicTitle: topicDoc.title || 'Topic',
+                moduleTitle: moduleDoc.title || 'Module',
+                pathOrCourseTitle: courseDoc.title || 'Course',
+                progressPercent,
+                lastTouchedAt: winner.lastTouchedAt,
+                deeplink: `/course/${moduleId}/topic/${topicId}?courseId=${winner.courseId}`,
+            },
+        });
+    } catch (err) {
+        console.error('getResumeTarget error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+// ============================================================================
+// SAVE REFLECTION — POST /api/courses/reflections
+// ============================================================================
+
+exports.saveReflection = async (req, res) => {
+    try {
+        const studentId = req.user.id;
+        const { courseId, pathId, moduleId, topicId, topicTitle,
+                whatClicked, whatsFuzzy, whereUseful } = req.body;
+
+        if (!moduleId || !topicId) {
+            return res.status(400).json({ error: 'moduleId and topicId are required.' });
+        }
+
+        const c1 = (whatClicked  || '').trim().slice(0, 1000);
+        const c2 = (whatsFuzzy   || '').trim().slice(0, 1000);
+        const c3 = (whereUseful  || '').trim().slice(0, 1000);
+
+        if (!c1 && !c2 && !c3) {
+            return res.status(400).json({ error: 'Please answer at least one prompt.' });
+        }
+
+        await Reflection.create({
+            studentId,
+            courseId: courseId || null,
+            pathId:   pathId   || null,
+            moduleId,
+            topicId,
+            topicTitle: (topicTitle || '').trim(),
+            whatClicked: c1,
+            whatsFuzzy:  c2,
+            whereUseful: c3,
+            submittedAt: new Date(),
+        });
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('saveReflection error:', err);
         res.status(500).json({ error: 'Server error' });
     }
 };

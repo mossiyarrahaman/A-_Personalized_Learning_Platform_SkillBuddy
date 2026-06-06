@@ -4,7 +4,7 @@
 // ============================================================================
 
 const axios = require('axios');
-const { TEACHER_PERSONA_SYSTEM } = require('../prompts/teacherPersona');
+const { TEACHER_PERSONA_SYSTEM, buildTopicGuidePrompt } = require('../prompts/teacherPersona');
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const AI_MODEL = process.env.AI_MODEL || 'qwen/qwen-2.5-7b-instruct';
@@ -67,16 +67,18 @@ function cleanJSONResponse(text) {
 // ============================================================================
 // callOpenRouter
 // ============================================================================
-async function callOpenRouter(prompt, maxTokens = 4000, temperature = 0.7, systemPrompt = null) {
+async function callOpenRouter(prompt, maxTokens = 4000, temperature = 0.7, systemPrompt = null, model = null) {
   if (!OPENROUTER_API_KEY) throw new Error('OpenRouter API key not configured.');
 
+  const effectiveModel = model || AI_MODEL;
+
   try {
-    console.log(`🤖 Calling OpenRouter [model: ${AI_MODEL}, maxTokens: ${maxTokens}]`);
+    console.log(`🤖 Calling OpenRouter [model: ${effectiveModel}, maxTokens: ${maxTokens}]`);
 
     const response = await axios.post(
       'https://openrouter.ai/api/v1/chat/completions',
       {
-        model: AI_MODEL,
+        model: effectiveModel,
         messages: [
           {
             role: 'system',
@@ -115,7 +117,7 @@ async function callOpenRouter(prompt, maxTokens = 4000, temperature = 0.7, syste
       const { status, data } = error.response;
       console.error(`❌ OpenRouter HTTP ${status}:`, JSON.stringify(data, null, 2));
       if (status === 401) throw new Error('Invalid OpenRouter API key');
-      if (status === 404) throw new Error(`Model not found: "${AI_MODEL}"`);
+      if (status === 404) throw new Error(`Model not found: "${effectiveModel}"`);
       if (status === 429) throw new Error('Rate limit hit — try again shortly');
     }
     console.error('❌ OpenRouter call failed:', error.message);
@@ -263,53 +265,28 @@ Field: ${safeField}, Level: ${safeLevel}.`;
 }
 
 // ============================================================================
-// generateResourceRecommendations
+// generateTopicGuide
+// Generates a standalone markdown topic guide using the teacher persona.
+// Returns a raw markdown string — no JSON wrapper.
 // ============================================================================
-async function generateResourceRecommendations(field, level, weakTopics) {
-  const topicsText = Array.isArray(weakTopics) ? weakTopics.join(', ') : 'general concepts';
-  const topicTitle = Array.isArray(weakTopics) && weakTopics.length > 0 ? weakTopics[0] : field;
-
-  const systemMsg = TEACHER_PERSONA_SYSTEM + `
-
-OUTPUT FORMAT: Respond with ONLY a valid JSON object — no text before or after:
-{
-  "content": "<your full markdown topic guide — use \\n for line breaks inside this JSON string>",
-  "recommendations": [
-    { "type": "youtube|article|practice|reference", "title": "...", "url": "https://...", "difficulty": "...", "topic": "..." }
-  ]
-}
-The "content" value is your complete markdown guide with all sections.
-The "recommendations" array must have exactly 5 items.`;
-
-  const userMsg = `You're writing a topic guide for one of your students.
-
-STUDENT CONTEXT
-- Field of study: ${field}
-- Level: ${level}
-- Topics to cover: ${topicsText}
-
-Write a topic guide for "${topicTitle}" with these sections in order:
-
-## What you're about to learn
-## Why this matters
-## The core idea   ← open with > 💡 Intuition: [everyday analogy]
-## How it works in practice   ← open with > 🔧 In practice: [real scenario]
-## What trips students up   ← use > ⚠️ Common mistake:
-## Check yourself   ← use > 🎯 Quick check:
-
-Return the guide as the "content" JSON string (\\n for line breaks).
-Also provide 5 resource recommendations as the "recommendations" array — mix of youtube, article, practice, reference types. All suitable for a ${level} learner.`;
+async function generateTopicGuide(field, level, topicTitle, topicDescription = '', priorTopics = [], contextChunks = '') {
+  const userMsg = buildTopicGuidePrompt({
+    topicTitle,
+    topicDescription: topicDescription || `Introduction to ${topicTitle}`,
+    field: field || 'General',
+    level: level || 'Intermediate',
+    priorTopics,
+    contextChunks,
+  });
 
   try {
-    const response = await callOpenRouter(userMsg, 4000, 0.78, systemMsg);
-    const cleaned = cleanJSONResponse(response);
-    return JSON.parse(cleaned);
+    let response = await callOpenRouter(userMsg, 1400, 0.78, TEACHER_PERSONA_SYSTEM);
+    // Strip <think> reasoning blocks some models emit before the real answer
+    response = response.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    return response;
   } catch (error) {
-    console.error('❌ generateResourceRecommendations failed:', error.message);
-    return {
-      content: `## Overview\nHere is a brief overview of ${topicsText}.\n\n(AI generation failed — please consult external resources.)`,
-      recommendations: [{ type: 'article', title: `${field} Documentation`, url: 'https://docs.google.com', difficulty: level, topic: field }]
-    };
+    console.error('❌ generateTopicGuide failed:', error.message);
+    return `## ${topicTitle}\n\n${topicDescription || ''}\n\n*(Topic guide generation failed — please consult your learning resources.)*`;
   }
 }
 
@@ -724,7 +701,7 @@ Field: ${field}, Level: ${level}, Topic: ${topicTitle}`;
 module.exports = {
   generateAssessmentQuestions,
   generateLearningPath,
-  generateResourceRecommendations,
+  generateTopicGuide,
   generateTopicStepPlan,
   generateQuizFromContext,
   generateTopicQuiz,

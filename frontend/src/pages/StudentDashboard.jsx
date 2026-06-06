@@ -3,19 +3,31 @@ import { useNavigate } from 'react-router-dom';
 import { BookOpen, Trophy, Clock, Search, Bell, User } from 'lucide-react';
 import RoadmapTree from '../components/RoadmapTree';
 import TopicDetailModal from '../components/TopicDetailModal';
+import ResumeCard from '../components/ResumeCard';
+import TutorChat from '../components/TutorChat';
 import { useAppTheme } from '../hooks/Useapptheme';
 import api from '../api/axios';
+import { getClientMeta } from '../utils/clientMeta';
+import { emitAnalyticsChanged } from '../utils/analyticsEvents';
+import { openReflection } from '../hooks/useReflectionPrompt';
 
 const StudentDashboard = ({ user, profile, onLogout, fetchProfile }) => {
     const navigate = useNavigate();
     const { theme, accent } = useAppTheme();
     const [selectedTopic, setSelectedTopic] = useState(null);
     const [showProfileMenu, setShowProfileMenu] = useState(false);
+    const [tutorCtx, setTutorCtx] = useState(null);
     const aGrad = `linear-gradient(135deg, ${accent.from}, ${accent.to})`;
 
     const handleTopicToggle = async (moduleId, topicId, status) => {
         try {
-            await api.post('/courses/path/toggle-topic', { moduleId, topicId, status });
+            const res = await api.post('/courses/path/toggle-topic', { moduleId, topicId, status, ...getClientMeta() });
+            if (res.data?.firstCompletion) {
+                openReflection({
+                    courseId: null, pathId: null, moduleId, topicId,
+                    topicTitle: res.data.topic?.title || '',
+                });
+            }
             await fetchProfile();
         } catch (err) {
             console.error('Error toggling topic:', err);
@@ -24,14 +36,22 @@ const StudentDashboard = ({ user, profile, onLogout, fetchProfile }) => {
 
     const handleQuizComplete = async (result, moduleId, topicId) => {
         try {
-            await api.post('/courses/path/submit-ai-quiz', {
+            const res = await api.post('/courses/path/submit-ai-quiz', {
                 moduleId,
                 topicId,
                 topicTitle: result.topicTitle,
                 score: result.pct,
                 totalQuestions: result.total,
                 correctAnswers: result.score,
+                ...getClientMeta(),
             });
+            if (res.data?.firstCompletion) {
+                openReflection({
+                    courseId: null, pathId: null, moduleId, topicId,
+                    topicTitle: result.topicTitle || '',
+                });
+            }
+            emitAnalyticsChanged('quiz_submitted');
             await fetchProfile();
         } catch (err) {
             console.error('Error submitting quiz result:', err);
@@ -49,7 +69,9 @@ const StudentDashboard = ({ user, profile, onLogout, fetchProfile }) => {
 
             {selectedTopic && (
                 <TopicDetailModal moduleId={selectedTopic.moduleId} topicId={selectedTopic.topicId}
-                    onClose={() => setSelectedTopic(null)} onUpdate={() => fetchProfile()} />
+                    onClose={() => setSelectedTopic(null)} onUpdate={() => fetchProfile()}
+                    onOpenTutor={(ctx) => { setSelectedTopic(null); setTutorCtx(ctx); }}
+                />
             )}
 
             {/* Header */}
@@ -105,6 +127,9 @@ const StudentDashboard = ({ user, profile, onLogout, fetchProfile }) => {
 
             {/* Content */}
             <div style={{ padding: '2rem' }}>
+                <div style={{ marginBottom: '1.5rem' }}>
+                    <ResumeCard />
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '1.25rem', marginBottom: '2rem' }}>
                     <StatCard title="Hours Studied" value={profile?.stats?.hoursStudied || 0} icon={Clock} iconColor="#60a5fa" theme={theme} />
                     <StatCard title="Courses Completed" value={profile?.stats?.coursesCompleted || 0} icon={BookOpen} iconColor="#34d399" theme={theme} />
@@ -121,6 +146,7 @@ const StudentDashboard = ({ user, profile, onLogout, fetchProfile }) => {
                             onTopicClick={(moduleId, topicId) => setSelectedTopic({ moduleId, topicId })}
                             onTopicToggle={handleTopicToggle}
                             onQuizComplete={handleQuizComplete}
+                            onOpenTutor={(ctx) => setTutorCtx(ctx)}
                         />
                     ) : (
                         <div style={{ textAlign: 'center', padding: '4rem 2rem', margin: '0 2rem 2rem', background: theme.surface, borderRadius: '1rem', border: `1px dashed ${theme.border}`, position: 'relative', zIndex: 1 }}>
@@ -133,6 +159,14 @@ const StudentDashboard = ({ user, profile, onLogout, fetchProfile }) => {
                     )}
                 </div>
             </div>
+
+            {/* Tutor modal — mounted outside RoadmapTree and TopicDetailModal stacking contexts */}
+            <TutorChat
+                isOpen={!!tutorCtx}
+                onClose={() => setTutorCtx(null)}
+                newSessionContext={tutorCtx}
+                sessionId={null}
+            />
         </div>
     );
 };

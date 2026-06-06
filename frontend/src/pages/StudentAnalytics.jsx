@@ -11,6 +11,7 @@ import api from '../api/axios';
 import { useAppTheme } from '../hooks/useAppTheme';
 import QuizModal from '../components/QuizModal';
 import { getLocalResults, syncPendingResults } from '../utils/quizStorage';
+import { onAnalyticsChanged } from '../utils/analyticsEvents';
 
 // ─── Custom tooltip ───────────────────────────────────────────────────────────
 const CTip = ({ active, payload, label, theme }) => {
@@ -232,18 +233,21 @@ const StudentAnalytics = () => {
 
     // Re-read when quiz results change (storage event from QuizModal or cross-tab)
     // Also refetch when the tab regains focus so stale data is never shown after switching tabs
+    // Also subscribe to the sb-analytics-changed custom event (covers dashboard quiz submits)
     useEffect(() => {
-        const handler = (e) => {
+        const storageHandler = (e) => {
             if (!e.key || e.key.startsWith('sb_quiz_results_')) {
                 console.log('[Analytics] Storage event - reloading data');
                 loadData();
             }
         };
-        window.addEventListener('storage', handler);
+        window.addEventListener('storage', storageHandler);
         window.addEventListener('focus', loadData);
+        const offAnalytics = onAnalyticsChanged(() => loadData());
         return () => {
-            window.removeEventListener('storage', handler);
+            window.removeEventListener('storage', storageHandler);
             window.removeEventListener('focus', loadData);
+            offAnalytics();
         };
     }, [loadData]);
 

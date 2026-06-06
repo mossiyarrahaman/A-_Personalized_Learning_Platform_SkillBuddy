@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { Loader } from 'lucide-react';
+import { onAnalyticsChanged } from '../utils/analyticsEvents';
 
 // Sub-dashboards
 import StudentDashboard from './StudentDashboard';
@@ -30,6 +31,18 @@ const Dashboard = () => {
 
     useEffect(() => {
         if (user) fetchProfile();
+    }, [user]);
+
+    // Refetch on window focus and on any quiz/analytics event
+    useEffect(() => {
+        if (!user || user.role !== 'student') return;
+        const refetch = () => fetchProfile();
+        window.addEventListener('focus', refetch);
+        const offAnalytics = onAnalyticsChanged(refetch);
+        return () => {
+            window.removeEventListener('focus', refetch);
+            offAnalytics();
+        };
     }, [user]);
 
     if (loading) return (

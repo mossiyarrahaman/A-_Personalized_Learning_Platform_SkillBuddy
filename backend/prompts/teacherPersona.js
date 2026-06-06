@@ -100,38 +100,40 @@ You are not an encyclopedia. You are a teacher. There is a difference.`;
 // Returns the user message for generating a standalone markdown topic guide.
 // Pair with TEACHER_PERSONA_SYSTEM as the system message.
 
-function buildTopicGuidePrompt({ topicTitle, topicDescription, field, level, priorTopics, learningStyle, contextChunks }) {
+function buildTopicGuidePrompt({ topicTitle, topicDescription, field, level, priorTopics, contextChunks }) {
+  const priorTopicsList = Array.isArray(priorTopics) && priorTopics.length > 0
+    ? priorTopics.join(', ')
+    : 'none yet';
+  const connectionPhrase = Array.isArray(priorTopics) && priorTopics.length > 0
+    ? `what they just learned (${priorTopics[priorTopics.length - 1]})`
+    : 'something they already know from daily life';
+
   return `You're writing a topic guide for one of your students.
 
 STUDENT CONTEXT
-- Field of study: ${field}
-- Level: ${level}
-- Preferred learning style: ${learningStyle || 'mixed'}
-- Topics already covered: ${priorTopics?.join(', ') || 'none yet'}
+- Field of study: ${field || 'General'}
+- Level: ${level || 'Intermediate'}
+- Topics already covered: ${priorTopicsList}
 
 TOPIC TO TEACH
 - Title: ${topicTitle}
 - What it covers (one-line spec): ${topicDescription}
-
-${contextChunks ? `REFERENCE MATERIAL (from the teacher's uploaded course content — use these as the source of truth, don't contradict them):
+${contextChunks ? `
+REFERENCE MATERIAL (from the teacher's uploaded course content — use these as the source of truth, don't contradict them):
 ${contextChunks}
 ` : ''}
 Write the topic guide following the format below EXACTLY.
 
-═══════════════════════════════════════════════════════════════════════
 ## What you're about to learn
-═══════════════════════════════════════════════════════════════════════
 One paragraph (3–4 sentences). Tell the student what this topic is about
-in plain language. NO jargon yet. Connect to ${priorTopics?.length ? `what they just learned (${priorTopics[priorTopics.length - 1]})` : 'something they already know from daily life'}.
+in plain language. NO jargon yet. Connect to ${connectionPhrase}.
 
 ## Why this matters
-═══════════════════════════════════════════════════════════════════════
 One short paragraph. Why does this topic exist? What problem does it
 solve? What would go wrong without it? Make the student feel like they're
 about to gain a real power, not memorize a definition.
 
 ## The core idea
-═══════════════════════════════════════════════════════════════════════
 Start with:
 > 💡 Intuition: [a one-sentence everyday-life analogy that captures the
 > idea]
@@ -143,7 +145,6 @@ example (or worked example for non-code topics) in a fenced block — but
 only if it earns its place.
 
 ## How it works in practice
-═══════════════════════════════════════════════════════════════════════
 Start with:
 > 🔧 In practice: [one sentence about where this shows up in real work]
 
@@ -153,7 +154,6 @@ the student would actually write. If it's a concept topic, give a
 realistic story.
 
 ## What trips students up
-═══════════════════════════════════════════════════════════════════════
 Pick the ONE most common mistake students make with this topic. Just one,
 not a list. Write it as:
 
@@ -163,17 +163,15 @@ Then explain in 2–3 sentences WHY students fall into it and what the
 correct mental model is.
 
 ## Check yourself
-═══════════════════════════════════════════════════════════════════════
 > 🎯 Quick check: [one question the student can answer in their head
 > right now to know if they got it]
 
 Give the answer in one or two sentences, after a single blank line.
 
-(Optional final section, only include if there's genuinely something
-worth saying:)
+(Optional final section — include ONLY if there's genuinely something
+worth saying. If not, omit this section entirely. Do not pad.)
 
 ## Going deeper
-═══════════════════════════════════════════════════════════════════════
 > 🧠 Going deeper: [one paragraph of advanced nuance for the curious
 > student — clearly marked as optional]`;
 }

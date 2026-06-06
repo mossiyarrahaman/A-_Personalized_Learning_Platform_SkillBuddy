@@ -25,6 +25,9 @@ const studentProfileSchema = new mongoose.Schema({
         hoursStudied: { type: Number, default: 0 },
         coursesCompleted: { type: Number, default: 0 },
         quizzesTaken: { type: Number, default: 0 },
+        // CROSS-COURSE aggregated average. Recomputed from all Progress.topicQuizScores
+        // in quizRecorderService (and the submitTopicQuiz / submitAiPathQuiz paths in
+        // courseController). Do not write this from any other path.
         avgScore: { type: Number, default: 0 }
     },
 

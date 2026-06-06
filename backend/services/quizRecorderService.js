@@ -46,6 +46,7 @@ async function recordQuizResult({
     correctAnswers,
     bloomLevel = 'understand',
     questionResults = [],
+    tzOffsetMinutes = 0,
 }) {
     // ── 1. Find or create Progress record ────────────────────────────────────
     let progress = await Progress.findOne({ student: studentId, course: courseId });
@@ -88,7 +89,7 @@ async function recordQuizResult({
     progress.avgQuizScore = Math.round(allScores.reduce((s, v) => s + v, 0) / allScores.length);
 
     // ── 5. Record daily activity ─────────────────────────────────────────────
-    progress.recordActivity({ quizTaken: true });
+    progress.recordActivity({ quizTaken: true, tzOffsetMinutes });
 
     // ── 6. Check topic completion ────────────────────────────────────────────
     // Topic = completed if: quiz passed AND all resources completed
@@ -134,10 +135,24 @@ async function recordQuizResult({
         }
 
         profile.stats.quizzesTaken = (profile.stats.quizzesTaken || 0) + 1;
-        const totalQuizzes = profile.stats.quizzesTaken;
-        profile.stats.avgScore = Math.round(
-            (((profile.stats.avgScore || 0) * (totalQuizzes - 1)) + score) / totalQuizzes
+
+        // Cross-course aggregate: pull from BOTH teacher-course quizzes
+        // (Progress.topicQuizScores) AND AI-path quizzes
+        // (StudentProfile.quizHistory). This mirrors the read-side merge
+        // in getMyQuizStats so the persisted value matches what students
+        // see on their analytics page.
+        const [allProgressDocs, profileForAvg] = await Promise.all([
+            Progress.find({ student: studentId }).select('topicQuizScores').lean(),
+            StudentProfile.findOne({ userId: studentId }).select('quizHistory').lean(),
+        ]);
+        const courseScores = allProgressDocs.flatMap(p =>
+            (p.topicQuizScores || []).map(q => q.score)
         );
+        const aiPathScores = (profileForAvg?.quizHistory || []).map(q => q.score);
+        const allScores = [...courseScores, ...aiPathScores];
+        profile.stats.avgScore = allScores.length
+            ? Math.round(allScores.reduce((s, v) => s + v, 0) / allScores.length)
+            : 0;
 
         // +10 for attempting, +50 for passing (replaces the attempt bonus on pass)
         pointsAwarded = passed ? 50 : 10;

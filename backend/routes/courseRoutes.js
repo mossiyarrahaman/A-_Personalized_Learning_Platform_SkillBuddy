@@ -14,11 +14,18 @@ router.get('/teacher-courses', auth, courseController.getTeacherCourses);
 router.put('/:courseId/modules', auth, courseController.updateCourseModules);
 router.patch('/:courseId/modules/:moduleId/topics/:topicId/status', auth, courseController.updateTopicStatus);
 router.get('/:courseId/analytics', auth, courseController.getCourseAnalytics);
+router.get('/:courseId/students-needing-attention', auth, courseController.getStudentsNeedingAttention);
 router.get('/:courseId/module/:moduleId/topic/:topicId/analytics', auth, courseController.getTopicAnalytics);
 // Topic Quiz Routes
 router.get('/:courseId/module/:moduleId/topic/:topicId/quiz', auth, courseController.adminTopicQuiz);
 router.post('/:courseId/module/:moduleId/topic/:topicId/quiz/submit', auth, courseController.submitTopicQuiz);
 router.get('/:courseId/my-tier-scores', auth, courseController.getMyTierScores);
+
+// Resume target (Feature A)
+router.get('/resume-target', auth, courseController.getResumeTarget);
+
+// Reflection submissions (Feature B)
+router.post('/reflections', auth, courseController.saveReflection);
 
 // Student quiz stats (real per-student data from DB)
 router.get('/my-quiz-stats',    auth, courseController.getMyQuizStats);

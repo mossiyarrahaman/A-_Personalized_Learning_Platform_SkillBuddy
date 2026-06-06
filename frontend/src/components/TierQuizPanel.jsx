@@ -3,6 +3,7 @@ import { Lock, CheckCircle, ChevronRight, Trophy } from 'lucide-react';
 import { TIER_CONFIG, TIERS, computeTierUnlocks, getTierStatus } from '../utils/tierUtils';
 import QuizModal from './QuizModal';
 import api from '../api/axios';
+import { emitAnalyticsChanged } from '../utils/analyticsEvents';
 
 const TierQuizPanel = ({
     courseId,
@@ -20,6 +21,7 @@ const TierQuizPanel = ({
 
     const handleQuizClose = useCallback(async () => {
         setActiveTier(null);
+        emitAnalyticsChanged('quiz_submitted');
         if (onScoresRefresh) await onScoresRefresh();
     }, [onScoresRefresh]);
 

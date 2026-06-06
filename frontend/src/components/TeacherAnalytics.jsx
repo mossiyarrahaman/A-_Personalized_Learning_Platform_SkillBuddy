@@ -1,4 +1,4 @@
-import React, { useState, useEffect, createContext, useContext } from 'react';
+import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
     CartesianGrid, PieChart, Pie, Cell,
@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import api from '../api/axios';
 import { useAppTheme } from '../hooks/useAppTheme';
+import { onAnalyticsChanged } from '../utils/analyticsEvents';
+import AttentionWidget from './AttentionWidget';
 
 const Ctx = createContext({});
 const useT = () => useContext(Ctx);
@@ -209,6 +211,8 @@ const TeacherAnalytics = ({ courses = [] }) => {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [highlightedStudentId, setHighlightedStudentId] = useState(null);
+    const currentEndpointRef = useRef(null);
 
     const ctxValue = { theme, accent, aGrad, tooltipStyle, courseId: selectedCourse };
 
@@ -244,7 +248,19 @@ const TeacherAnalytics = ({ courses = [] }) => {
         }
     }, [selectedCourse, activeView, selectedStudentId]);
 
+    // Refetch on window focus or when a student submits a quiz from another tab/page
+    useEffect(() => {
+        const refetch = () => { if (currentEndpointRef.current) fetchData(currentEndpointRef.current); };
+        window.addEventListener('focus', refetch);
+        const offAnalytics = onAnalyticsChanged(refetch);
+        return () => {
+            window.removeEventListener('focus', refetch);
+            offAnalytics();
+        };
+    }, []);
+
     const fetchData = async (endpoint) => {
+        currentEndpointRef.current = endpoint;
         setLoading(true); setError(null);
         try {
             const res = await api.get(endpoint);
@@ -271,6 +287,16 @@ const TeacherAnalytics = ({ courses = [] }) => {
     const openStudentDetail = (studentId) => navigateTo('student-detail', studentId);
     const backFromStudent = goBack;
 
+    const handleAttentionClick = (studentId) => {
+        setActiveView('students');
+        setHighlightedStudentId(studentId);
+    };
+
+    // Clear the highlight whenever the teacher leaves the Students tab
+    useEffect(() => {
+        if (activeView !== 'students') setHighlightedStudentId(null);
+    }, [activeView]);
+
     if (safeCourses.length === 0) {
         return <Ctx.Provider value={ctxValue}><EmptyState message="Create a course and enroll students to see analytics." /></Ctx.Provider>;
     }
@@ -278,6 +304,8 @@ const TeacherAnalytics = ({ courses = [] }) => {
     return (
         <Ctx.Provider value={ctxValue}>
             <div className="space-y-6">
+                {/* TODO: multi-course aggregate attention summary would be nice here */}
+                {selectedCourse && <AttentionWidget courseId={selectedCourse} onStudentClick={handleAttentionClick} />}
                 <div className="flex flex-col gap-4">
                     <div className="flex items-center gap-4">
                         <select
@@ -317,7 +345,7 @@ const TeacherAnalytics = ({ courses = [] }) => {
                     <>
                         {activeView === 'overview'          && <OverviewView data={data} onStudentClick={openStudentDetail} />}
                         {activeView === 'topics'            && <TopicsView data={data} />}
-                        {activeView === 'students'          && <StudentsView data={data} onStudentClick={openStudentDetail} />}
+                        {activeView === 'students'          && <StudentsView data={data} onStudentClick={openStudentDetail} highlightedStudentId={highlightedStudentId} />}
                         {activeView === 'quiz-intelligence' && <QuizIntelligenceView data={data} onStudentClick={openStudentDetail} />}
                         {activeView === 'teacher-quiz'      && <TeacherQuizView data={data} />}
                         {activeView === 'assignments'       && <AssignmentResultsView data={data} />}
@@ -1406,13 +1434,21 @@ const PerformanceChartsView = ({ data }) => {
 // VIEW 5 (NEW): TOPIC PROGRESS — student × topic heatmap
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const TopicProgressView = ({ data, onStudentClick }) => {
+const TopicProgressView = ({ data, onStudentClick, highlightedStudentId }) => {
     const { theme, accent, tooltipStyle } = useT();
     const [viewMode, setViewMode] = useState('heatmap');
     const [perfMode, setPerfMode] = useState('class');
     const [selectedStudentId, setSelectedStudentId] = useState(null);
     const { topics = [], students = [], matrix = {} } = data || {};
-    const selStudentId = selectedStudentId || students[0]?.studentId || null;
+    const highlightRef = useRef(null);
+
+    useEffect(() => {
+        if (highlightedStudentId && highlightRef.current) {
+            highlightRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        }
+    }, [highlightedStudentId]);
+    // highlightedStudentId takes over the "By Student" picker when arriving from AttentionWidget
+    const selStudentId = highlightedStudentId || selectedStudentId || students[0]?.studentId || null;
 
     const topicsWithStats = topics.map(t => {
         const cells = students.map(s => matrix[t.topicId]?.[s.studentId] || { status: 'not_started', score: null, attempts: 0 });
@@ -1466,11 +1502,17 @@ const TopicProgressView = ({ data, onStudentClick }) => {
                         <thead>
                             <tr style={{ background: theme.bg }}>
                                 <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', whiteSpace: 'nowrap', minWidth: '180px', position: 'sticky', left: 0, background: theme.bg, zIndex: 2 }}>Topic</th>
-                                {students.map(s => (
-                                    <th key={s.studentId} style={{ padding: '8px 6px', fontSize: '10px', fontWeight: 600, color: theme.textMuted, textAlign: 'center', minWidth: '40px', maxWidth: '60px' }}>
-                                        <span title={s.name} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '52px' }}>{s.name.split(' ')[0]}</span>
-                                    </th>
-                                ))}
+                                {students.map(s => {
+                                    const isHighlighted = s.studentId === highlightedStudentId;
+                                    return (
+                                        <th key={s.studentId}
+                                            ref={isHighlighted ? highlightRef : null}
+                                            style={{ padding: '8px 6px', fontSize: '10px', fontWeight: isHighlighted ? 700 : 600, color: isHighlighted ? accent.from : theme.textMuted, textAlign: 'center', minWidth: '40px', maxWidth: '60px', background: isHighlighted ? `${accent.from}20` : 'transparent', borderBottom: isHighlighted ? `2px solid ${accent.from}60` : undefined, transition: 'background 0.3s, color 0.3s' }}
+                                        >
+                                            <span title={s.name} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '52px' }}>{s.name.split(' ')[0]}</span>
+                                        </th>
+                                    );
+                                })}
                                 <th style={{ padding: '8px 12px', fontSize: '11px', fontWeight: 700, color: theme.textMuted, textAlign: 'center' }}>Class %</th>
                             </tr>
                         </thead>
@@ -1631,7 +1673,7 @@ const TopicProgressView = ({ data, onStudentClick }) => {
 // STUDENTS VIEW — merges Topic Progress, Student Tiers, At-Risk into sub-views
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const StudentsView = ({ data, onStudentClick }) => {
+const StudentsView = ({ data, onStudentClick, highlightedStudentId }) => {
     const { theme, accent, courseId } = useT();
     const [subView, setSubView]       = useState('grid');
     const [tierData, setTierData]     = useState(null);
@@ -1679,7 +1721,7 @@ const StudentsView = ({ data, onStudentClick }) => {
                 </div>
             ) : (
                 <>
-                    {subView === 'grid'    && <TopicProgressView data={data} onStudentClick={onStudentClick} />}
+                    {subView === 'grid'    && <TopicProgressView data={data} onStudentClick={onStudentClick} highlightedStudentId={highlightedStudentId} />}
                     {subView === 'tiers'   && (tierData   ? <StudentTierMatrixView data={tierData} onStudentClick={onStudentClick} /> : <EmptyState message="No tier quiz data yet." />)}
                     {subView === 'at-risk' && (atRiskData ? <AtRiskView data={atRiskData} onStudentClick={onStudentClick} /> : <EmptyState message="No at-risk data yet." />)}
                 </>

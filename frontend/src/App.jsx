@@ -1,6 +1,8 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import ReflectionModal from './components/ReflectionModal';
+import { useReflectionPromptRegistry } from './hooks/useReflectionPrompt';
 import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -42,44 +44,60 @@ const NotFound = () => (
   </div>
 );
 
+// Inner component so useReflectionPromptRegistry runs inside Router + AuthProvider
+function AppRoutes() {
+  const { isOpen, context, onClose } = useReflectionPromptRegistry();
+  return (
+    <>
+      <Suspense fallback={<LoadingFallback />}>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+
+          <Route path="/onboarding" element={
+            <ProtectedRoute><Onboarding /></ProtectedRoute>
+          } />
+
+          {/* Teacher Dashboard — teacher role required */}
+          <Route path="/teacher-dashboard" element={
+            <ProtectedRoute roleRequired="teacher"><TeacherDashboard /></ProtectedRoute>
+          } />
+
+          {/* Main App with Sidebar Layout */}
+          <Route element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/course/:moduleId/topic/:topicId" element={<CourseView />} />
+            <Route path="/doubts" element={<Doubts />} />
+            <Route path="/analytics" element={<StudentAnalytics />} />
+            <Route path="/leaderboard" element={<Leaderboard />} />
+            <Route path="/my-courses" element={<MyCourses />} />
+            <Route path="/class/:courseId" element={<ClassView />} />
+            <Route path="/ai-path" element={<AIPathCurriculum />} />
+            <Route path="/ai-path/:pathId" element={<AIPathCurriculum />} />
+            <Route path="/ai-course/module/:moduleId/topic/:topicId" element={<CourseView />} />
+            <Route path="/profile" element={<ProfileSettings />} />
+          </Route>
+
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
+      <ReflectionModal
+        isOpen={isOpen}
+        onClose={onClose}
+        topicTitle={context?.topicTitle || ''}
+        context={context}
+      />
+    </>
+  );
+}
+
 function App() {
   return (
     <AuthProvider>
       <Router>
-        <Suspense fallback={<LoadingFallback />}>
-          <Routes>
-            <Route path="/" element={<LandingPage />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
-
-            <Route path="/onboarding" element={
-              <ProtectedRoute><Onboarding /></ProtectedRoute>
-            } />
-
-            {/* Teacher Dashboard — teacher role required */}
-            <Route path="/teacher-dashboard" element={
-              <ProtectedRoute roleRequired="teacher"><TeacherDashboard /></ProtectedRoute>
-            } />
-
-            {/* Main App with Sidebar Layout */}
-            <Route element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/course/:moduleId/topic/:topicId" element={<CourseView />} />
-              <Route path="/doubts" element={<Doubts />} />
-              <Route path="/analytics" element={<StudentAnalytics />} />
-              <Route path="/leaderboard" element={<Leaderboard />} />
-              <Route path="/my-courses" element={<MyCourses />} />
-              <Route path="/class/:courseId" element={<ClassView />} />
-              <Route path="/ai-path" element={<AIPathCurriculum />} />
-              <Route path="/ai-path/:pathId" element={<AIPathCurriculum />} />
-              <Route path="/ai-course/module/:moduleId/topic/:topicId" element={<CourseView />} />
-              <Route path="/profile" element={<ProfileSettings />} />
-            </Route>
-
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Suspense>
+        <AppRoutes />
       </Router>
     </AuthProvider>
   );

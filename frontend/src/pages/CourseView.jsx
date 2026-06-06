@@ -1,90 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { ChevronLeft, Play, Book, CheckCircle, Circle, MessageSquare, Loader } from 'lucide-react';
 import api from '../api/axios';
 import ResourcePlayer from '../components/ResourcePlayer';
-
-// Renders a markdown string into React elements.
-// Handles: ## h2, ### h3, > blockquote, ``` code blocks, **bold**, `inline code`, - lists, 1. ordered lists.
-// Also fixes content stored with literal \n escape sequences instead of real newlines.
-function renderMarkdown(content) {
-    if (!content) return null;
-    const lines = content.replace(/\\n/g, '\n').split('\n');
-    const els = [];
-    let i = 0;
-
-    const inlineFmt = (text) => {
-        const parts = [];
-        const re = /(\*\*[^*\n]+\*\*|`[^`\n]+`)/g;
-        let last = 0, m;
-        while ((m = re.exec(text)) !== null) {
-            if (m.index > last) parts.push(text.slice(last, m.index));
-            const tok = m[0];
-            if (tok.startsWith('**')) {
-                parts.push(<strong key={m.index} className="text-white font-semibold">{tok.slice(2, -2)}</strong>);
-            } else {
-                parts.push(<code key={m.index} className="bg-gray-900 text-green-400 px-1.5 py-0.5 rounded text-sm font-mono">{tok.slice(1, -1)}</code>);
-            }
-            last = m.index + tok.length;
-        }
-        if (last < text.length) parts.push(text.slice(last));
-        return parts.length > 0 ? parts : text;
-    };
-
-    while (i < lines.length) {
-        const line = lines[i];
-        const t = line.trim();
-
-        if (t.startsWith('```')) {
-            const codeLines = [];
-            i++;
-            while (i < lines.length && !lines[i].trim().startsWith('```')) { codeLines.push(lines[i]); i++; }
-            i++;
-            els.push(<pre key={els.length} className="bg-gray-900/80 border border-gray-700 rounded-lg p-4 my-4 overflow-x-auto"><code className="text-green-300 text-sm font-mono leading-relaxed">{codeLines.join('\n')}</code></pre>);
-            continue;
-        }
-        if (/^## /.test(t)) {
-            els.push(<h2 key={els.length} className="text-xl font-bold text-white mt-8 mb-3 pb-2 border-b border-gray-700">{inlineFmt(t.slice(3))}</h2>);
-            i++; continue;
-        }
-        if (/^### /.test(t)) {
-            els.push(<h3 key={els.length} className="text-base font-bold text-purple-300 mt-5 mb-2">{inlineFmt(t.slice(4))}</h3>);
-            i++; continue;
-        }
-        if (t.startsWith('> ')) {
-            const qLines = [];
-            while (i < lines.length && lines[i].trim().startsWith('> ')) { qLines.push(lines[i].trim().slice(2)); i++; }
-            els.push(
-                <blockquote key={els.length} className="border-l-4 border-purple-500 bg-purple-900/20 pl-4 pr-3 py-2 my-3 rounded-r-lg">
-                    {qLines.map((ql, qi) => <p key={qi} className="text-purple-200 text-sm leading-relaxed">{inlineFmt(ql)}</p>)}
-                </blockquote>
-            );
-            continue;
-        }
-        if (/^[-•] /.test(t)) {
-            const items = [];
-            while (i < lines.length && /^[-•] /.test(lines[i].trim())) { items.push(lines[i].trim().replace(/^[-•] /, '')); i++; }
-            els.push(<ul key={els.length} className="list-disc list-inside space-y-1 my-3 text-gray-300">{items.map((it, ii) => <li key={ii} className="leading-relaxed">{inlineFmt(it)}</li>)}</ul>);
-            continue;
-        }
-        if (/^\d+\. /.test(t)) {
-            const items = [];
-            while (i < lines.length && /^\d+\. /.test(lines[i].trim())) { items.push(lines[i].trim().replace(/^\d+\. /, '')); i++; }
-            els.push(<ol key={els.length} className="list-decimal list-inside space-y-1 my-3 text-gray-300">{items.map((it, ii) => <li key={ii} className="leading-relaxed">{inlineFmt(it)}</li>)}</ol>);
-            continue;
-        }
-        if (t.length === 0) { i++; continue; }
-        els.push(<p key={els.length} className="mb-3 text-gray-300 leading-relaxed">{inlineFmt(t)}</p>);
-        i++;
-    }
-    return els;
-}
+import MarkdownContent from '../components/MarkdownContent';
+import TutorPromptInput from '../components/TutorPromptInput';
+import TutorChat from '../components/TutorChat';
+import { useAppTheme } from '../hooks/useAppTheme';
 
 const CourseView = () => {
     const { moduleId, topicId } = useParams();
     const navigate = useNavigate();
+    const location = useLocation();
+    const { theme, accent } = useAppTheme();
     const [loading, setLoading] = useState(true);
     const [topic, setTopic] = useState(null);
+
+    // courseId from query param (?courseId=...) for teacher-course routes
+    const courseId = new URLSearchParams(location.search).get('courseId') || null;
+    const isAiPath = location.pathname.startsWith('/ai-course');
+
+    const [tutorCtx, setTutorCtx] = useState(null);
 
     useEffect(() => {
         const fetchTopic = async () => {
@@ -195,11 +131,23 @@ const CourseView = () => {
                             <Book className="w-6 h-6 text-purple-400 mr-3" />
                             <h2 className="text-2xl font-bold text-white">Topic Guide</h2>
                         </div>
-                        <div className="prose prose-invert max-w-none prose-purple">
-                            {renderMarkdown(topic.content)}
+                        <div>
+                            <MarkdownContent content={topic.content} theme={theme} accent={accent} />
                         </div>
                     </div>
                 )}
+
+                {/* Tutor entry point */}
+                <div className="mb-8">
+                    <TutorPromptInput
+                        topicTitle={topic.title || ''}
+                        topicId={topicId}
+                        moduleId={moduleId}
+                        courseId={isAiPath ? null : courseId}
+                        pathId={null}
+                        onOpenTutor={(ctx) => setTutorCtx(ctx)}
+                    />
+                </div>
 
                 {/* Resources List */}
                 <h2 className="text-2xl font-bold mb-6">Learning Resources</h2>
@@ -322,6 +270,14 @@ const CourseView = () => {
                     </div>
                 </div>
             )}
+
+            {/* Tutor modal */}
+            <TutorChat
+                isOpen={!!tutorCtx}
+                onClose={() => setTutorCtx(null)}
+                newSessionContext={tutorCtx}
+                sessionId={null}
+            />
         </div>
     );
 };

@@ -115,7 +115,10 @@ const progressSchema = new mongoose.Schema({
 
     // ── Aggregated metrics (updated on each interaction) ─────────────────────
     totalTimeSpent: { type: Number, default: 0 },       // Total seconds across all resources
-    avgQuizScore: { type: Number, default: 0 },          // Running average of all quiz scores
+    // PER-COURSE average. Recomputed from this doc's topicQuizScores array in
+    // courseController (submitTopicQuiz). Single source of truth for course-level
+    // analytics. Do not update this with a running-average formula.
+    avgQuizScore: { type: Number, default: 0 },
     grade: { type: Number, default: 0 },                 // Computed overall grade
 
     // ── Risk assessment ──────────────────────────────────────────────────────
@@ -148,14 +151,23 @@ progressSchema.index({ course: 1, avgQuizScore: 1 });
 
 // ── Helper: get today's date string ──────────────────────────────────────────
 
-function todayStr() {
-    return new Date().toISOString().slice(0, 10);
+// tzOffsetMinutes is the value returned by the browser's
+// new Date().getTimezoneOffset() — positive for UTC-west, negative for UTC-east.
+// For IST (UTC+5:30) that value is -330.
+// JS's getTimezoneOffset() gives: offset = UTC_minutes - local_minutes,
+// so  local_time = UTC - offset_minutes.
+// Subtracting it from now.getTime() shifts the UTC timestamp to the local
+// wall-clock value, then .toISOString().slice(0,10) gives the local date.
+function localDateStr(tzOffsetMinutes = 0) {
+    const now = new Date();
+    const local = new Date(now.getTime() - tzOffsetMinutes * 60000);
+    return local.toISOString().slice(0, 10);
 }
 
 // ── Instance method: record daily activity ───────────────────────────────────
 
-progressSchema.methods.recordActivity = function ({ timeSpent = 0, resourceCompleted = false, quizTaken = false, topicCompleted = false }) {
-    const today = todayStr();
+progressSchema.methods.recordActivity = function ({ timeSpent = 0, resourceCompleted = false, quizTaken = false, topicCompleted = false, tzOffsetMinutes = 0 }) {
+    const today = localDateStr(tzOffsetMinutes);
     let entry = this.dailyActivity.find(d => d.date === today);
 
     if (!entry) {

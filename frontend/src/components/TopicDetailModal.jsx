@@ -3,94 +3,8 @@ import { X, Book, BookOpen, CheckCircle, Play, FileText, ExternalLink, Loader, A
 import api from '../api/axios';
 import { useAppTheme } from '../hooks/useAppTheme';
 import TierQuizPanel from './TierQuizPanel';
-
-// Theme-aware markdown renderer. Handles: ## h2, ### h3, > blockquote, ``` code blocks,
-// **bold**, `inline code`, - bullet lists, 1. ordered lists.
-// Also normalises content stored with literal \n escape sequences.
-function renderTopicContent(content, theme) {
-    if (!content) return null;
-    const lines = content.replace(/\\n/g, '\n').split('\n');
-    const els = [];
-    let i = 0;
-
-    const inlineFmt = (text) => {
-        const parts = [];
-        const re = /(\*\*[^*\n]+\*\*|`[^`\n]+`)/g;
-        let last = 0, m;
-        while ((m = re.exec(text)) !== null) {
-            if (m.index > last) parts.push(text.slice(last, m.index));
-            const tok = m[0];
-            if (tok.startsWith('**')) {
-                parts.push(<strong key={m.index} style={{ color: theme.textPrimary, fontWeight: 600 }}>{tok.slice(2, -2)}</strong>);
-            } else {
-                parts.push(<code key={m.index} style={{ background: theme.bg, color: '#86efac', padding: '1px 6px', borderRadius: 4, fontSize: '0.8em', fontFamily: 'monospace' }}>{tok.slice(1, -1)}</code>);
-            }
-            last = m.index + tok.length;
-        }
-        if (last < text.length) parts.push(text.slice(last));
-        return parts.length > 0 ? parts : text;
-    };
-
-    while (i < lines.length) {
-        const line = lines[i];
-        const t = line.trim();
-
-        if (t.startsWith('```')) {
-            const codeLines = [];
-            i++;
-            while (i < lines.length && !lines[i].trim().startsWith('```')) { codeLines.push(lines[i]); i++; }
-            i++;
-            els.push(
-                <pre key={els.length} style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: '12px 16px', margin: '12px 0', overflowX: 'auto' }}>
-                    <code style={{ color: '#86efac', fontSize: '0.8em', fontFamily: 'monospace', lineHeight: 1.6 }}>{codeLines.join('\n')}</code>
-                </pre>
-            );
-            continue;
-        }
-        if (/^## /.test(t)) {
-            els.push(<h2 key={els.length} style={{ color: theme.textPrimary, fontWeight: 700, fontSize: '1.1em', marginTop: 24, marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${theme.border}` }}>{inlineFmt(t.slice(3))}</h2>);
-            i++; continue;
-        }
-        if (/^### /.test(t)) {
-            els.push(<h3 key={els.length} style={{ color: theme.textPrimary, fontWeight: 600, fontSize: '0.95em', marginTop: 16, marginBottom: 6 }}>{inlineFmt(t.slice(4))}</h3>);
-            i++; continue;
-        }
-        if (t.startsWith('> ')) {
-            const qLines = [];
-            while (i < lines.length && lines[i].trim().startsWith('> ')) { qLines.push(lines[i].trim().slice(2)); i++; }
-            els.push(
-                <blockquote key={els.length} style={{ borderLeft: '3px solid #a855f7', background: 'rgba(168,85,247,0.08)', paddingLeft: 12, paddingRight: 10, paddingTop: 6, paddingBottom: 6, margin: '10px 0', borderRadius: '0 6px 6px 0' }}>
-                    {qLines.map((ql, qi) => <p key={qi} style={{ color: theme.textSecondary, fontSize: '0.875em', lineHeight: 1.6, margin: 0 }}>{inlineFmt(ql)}</p>)}
-                </blockquote>
-            );
-            continue;
-        }
-        if (/^[-•] /.test(t)) {
-            const items = [];
-            while (i < lines.length && /^[-•] /.test(lines[i].trim())) { items.push(lines[i].trim().replace(/^[-•] /, '')); i++; }
-            els.push(
-                <ul key={els.length} style={{ paddingLeft: 20, margin: '8px 0' }}>
-                    {items.map((it, ii) => <li key={ii} style={{ color: theme.textSecondary, fontSize: '0.875em', lineHeight: 1.7, listStyleType: 'disc' }}>{inlineFmt(it)}</li>)}
-                </ul>
-            );
-            continue;
-        }
-        if (/^\d+\. /.test(t)) {
-            const items = [];
-            while (i < lines.length && /^\d+\. /.test(lines[i].trim())) { items.push(lines[i].trim().replace(/^\d+\. /, '')); i++; }
-            els.push(
-                <ol key={els.length} style={{ paddingLeft: 20, margin: '8px 0' }}>
-                    {items.map((it, ii) => <li key={ii} style={{ color: theme.textSecondary, fontSize: '0.875em', lineHeight: 1.7, listStyleType: 'decimal' }}>{inlineFmt(it)}</li>)}
-                </ol>
-            );
-            continue;
-        }
-        if (t.length === 0) { i++; continue; }
-        els.push(<p key={els.length} style={{ color: theme.textSecondary, fontSize: '0.875em', lineHeight: 1.7, marginBottom: 8 }}>{inlineFmt(t)}</p>);
-        i++;
-    }
-    return els;
-}
+import MarkdownContent from './MarkdownContent';
+import TutorPromptInput from './TutorPromptInput';
 
 const BLOOMS_LEVELS = [
     { id: 'remember', label: 'Remembering', description: 'Recall facts and basic concepts' },
@@ -224,7 +138,9 @@ const StepPlanSection = ({ plan, moduleId, topicId, pathId, onStepToggle }) => {
 
                                     {/* Explanation */}
                                     {step.explanation && (
-                                        <p className="leading-relaxed text-sm pt-4" style={{ color: theme.textSecondary, lineHeight: '1.75' }}>{step.explanation}</p>
+                                        <div className="pt-4">
+                                            <MarkdownContent content={step.explanation} theme={theme} accent={accent} />
+                                        </div>
                                     )}
 
                                     {/* Teacher's Note */}
@@ -304,7 +220,7 @@ const StepPlanSection = ({ plan, moduleId, topicId, pathId, onStepToggle }) => {
                                             {step.resources.map((res, ri) => (
                                                 <a
                                                     key={ri}
-                                                    href={res.url}
+                                                    href={(!res.url || res.url === '#') ? `https://www.google.com/search?q=${encodeURIComponent(res.title)}` : res.url}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     className="flex items-start gap-3 p-3 rounded-lg transition-all"
@@ -348,7 +264,7 @@ const StepPlanSection = ({ plan, moduleId, topicId, pathId, onStepToggle }) => {
 };
 
 // ── Main Component ─────────────────────────────────────────────────────────
-const TopicDetailModal = ({ courseId, moduleId, topicId, pathId, onClose, onUpdate }) => {
+const TopicDetailModal = ({ courseId, moduleId, topicId, pathId, onClose, onUpdate, onOpenTutor }) => {
     const { theme, accent } = useAppTheme();
     const aGrad = `linear-gradient(135deg,${accent.from},${accent.to})`;
 
@@ -860,7 +776,21 @@ const TopicDetailModal = ({ courseId, moduleId, topicId, pathId, onClose, onUpda
                             {/* ── AI PATH: fallback content ── */}
                             {isAiPath && (!topic?.plan?.steps || topic.plan.steps.length === 0) && topic?.content && (
                                 <div className="rounded-xl p-6" style={{ background: theme.surface, border: `1px solid ${theme.border}` }}>
-                                    {renderTopicContent(topic.content, theme)}
+                                    <MarkdownContent content={topic.content} theme={theme} accent={accent} />
+                                </div>
+                            )}
+
+                            {/* ── Tutor entry point (AI path) ── */}
+                            {isAiPath && !loading && topic && onOpenTutor && (
+                                <div style={{ marginTop: '32px' }}>
+                                    <TutorPromptInput
+                                        topicTitle={topic.title || ''}
+                                        topicId={topicId}
+                                        moduleId={moduleId}
+                                        courseId={null}
+                                        pathId={pathId || null}
+                                        onOpenTutor={onOpenTutor}
+                                    />
                                 </div>
                             )}
 
@@ -869,7 +799,7 @@ const TopicDetailModal = ({ courseId, moduleId, topicId, pathId, onClose, onUpda
                                 <div>
                                     {topic?.content && (
                                         <div className="rounded-xl p-6 mb-8" style={{ background: theme.surface, border: `1px solid ${theme.border}` }}>
-                                            {renderTopicContent(topic.content, theme)}
+                                            <MarkdownContent content={topic.content} theme={theme} accent={accent} />
                                         </div>
                                     )}
                                     <div className="flex items-center gap-2.5 mb-5">
@@ -938,6 +868,20 @@ const TopicDetailModal = ({ courseId, moduleId, topicId, pathId, onClose, onUpda
                                             <div className="text-center py-4 italic" style={{ color: theme.textMuted }}>No resources for this topic.</div>
                                         )}
                                     </div>
+                                    {/* ── Tutor entry point (teacher course) ── */}
+                                    {!loading && topic && onOpenTutor && (
+                                        <div style={{ marginTop: '32px' }}>
+                                            <TutorPromptInput
+                                                topicTitle={topic.title || ''}
+                                                topicId={topicId}
+                                                moduleId={moduleId}
+                                                courseId={courseId || null}
+                                                pathId={pathId || null}
+                                                onOpenTutor={onOpenTutor}
+                                            />
+                                        </div>
+                                    )}
+
                                     <AnalyticsSection />
 
                                     {/* ── ASSIGNMENTS SECTION ── */}

@@ -66,12 +66,12 @@ router.post('/generate-quiz', auth, async (req, res) => {
 // ============================================================================
 // Bloom's level map: difficulty or explicit bloomLevel → Bloom's taxonomy key
 const DIFFICULTY_TO_BLOOM = {
-    'easy':         'remember',
-    'Easy':         'remember',
+    'easy': 'remember',
+    'Easy': 'remember',
     'intermediate': 'apply',
     'Intermediate': 'apply',
-    'hard':         'analyze',
-    'Hard':         'analyze',
+    'hard': 'analyze',
+    'Hard': 'analyze',
 };
 
 router.post('/generate-topic-quiz', auth, async (req, res) => {
@@ -105,7 +105,7 @@ router.post('/generate-topic-quiz', auth, async (req, res) => {
                         moduleTitle = mod?.title || '';
                     }
                 }
-            } catch (_) {}
+            } catch (_) { }
         }
 
         // RAG retrieval: use topic + module title as query for better chunk matching
@@ -157,13 +157,14 @@ router.post('/evaluate-strength', auth, async (req, res) => {
 
         const evaluation = aiAssistant.evaluateStrength(quizResponses);
 
-        // Update student profile with new stats
-        const userId = req.user.id;
-        const profile = await StudentProfile.findOne({ userId });
-        if (profile) {
-            profile.stats.avgScore = evaluation.overall_score;
-            await profile.save();
-        }
+        // NOTE: We deliberately do NOT write evaluation.overall_score to
+        // StudentProfile.stats.avgScore here. That field is the cross-course
+        // aggregate, recomputed from all topicQuizScores at quiz submission
+        // time (see courseController.submitTopicQuiz and submitAiPathQuiz).
+        // Writing a single-session score here would stomp the aggregate.
+        // evaluation is returned for the frontend to use directly — the
+        // frontend hook in useAIAssistant uses the overall_score and the
+        // strength_analysis breakdown for in-flow UI, not as persisted state.
 
         res.json(evaluation);
 
