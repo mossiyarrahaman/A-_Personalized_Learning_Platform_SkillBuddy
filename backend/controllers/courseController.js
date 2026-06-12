@@ -300,6 +300,38 @@ exports.getTopicDetails = async (req, res) => {
             topicDoc = moduleDoc.topics.find(t => t.id === topicId || t._id.toString() === topicId);
             contextType = 'teacher_course';
 
+            if (topicDoc && !topicDoc.content) {
+                console.log(`Generating topic guide for teacher course: ${topicDoc.title}`);
+                const field = course.field || course.title || 'General';
+                const level = course.level || 'beginner';
+                try {
+                    // Walk course.modules to build curriculum context for dependency awareness
+                    const tcPriorTopics = [];
+                    const tcUpcomingTopics = [];
+                    let tcFoundCurrent = false;
+                    const currentTopicKey = topicDoc.id || topicDoc._id?.toString();
+                    for (const m of course.modules) {
+                        for (const t of m.topics) {
+                            const tKey = t.id || t._id?.toString();
+                            if (tKey === currentTopicKey) {
+                                tcFoundCurrent = true;
+                            } else if (!tcFoundCurrent) {
+                                tcPriorTopics.push(t.title);
+                            } else {
+                                tcUpcomingTopics.push(t.title);
+                            }
+                        }
+                    }
+                    topicDoc.content = await aiService.generateTopicGuide(
+                        field, level, topicDoc.title, topicDoc.description || '',
+                        tcPriorTopics, tcUpcomingTopics, moduleDoc.title, course.title
+                    );
+                    await course.save();
+                } catch (err) {
+                    console.error('Topic guide generation failed:', err);
+                }
+            }
+
         } else {
             // Case 2: Fetching from AI Learning Path (StudentProfile)
             const profile = await StudentProfile.findOne({ userId });
@@ -363,9 +395,28 @@ exports.getTopicDetails = async (req, res) => {
                 if (topicToUpdate && !topicToUpdate.content) {
                     const field = containerG.onboarding?.field || profileG.onboarding.field;
                     const level = containerG.onboarding?.level || profileG.onboarding.level;
+                    // Walk path modules to build curriculum context for dependency awareness
+                    const aiPriorTopics = [];
+                    const aiUpcomingTopics = [];
+                    let aiFoundCurrent = false;
+                    const currentTopicKey = topicToUpdate.id || topicToUpdate._id?.toString();
+                    for (const m of containerG.modules) {
+                        for (const t of m.topics) {
+                            const tKey = t.id || t._id?.toString();
+                            if (tKey === currentTopicKey) {
+                                aiFoundCurrent = true;
+                            } else if (!aiFoundCurrent) {
+                                aiPriorTopics.push(t.title);
+                            } else {
+                                aiUpcomingTopics.push(t.title);
+                            }
+                        }
+                    }
+                    const aiPathTitle = `${field} Learning Path`;
                     console.log(`Generating topic guide for: ${topicToUpdate.title}`);
                     topicToUpdate.content = await aiService.generateTopicGuide(
-                        field, level, topicToUpdate.title, topicToUpdate.description || ''
+                        field, level, topicToUpdate.title, topicToUpdate.description || '',
+                        aiPriorTopics, aiUpcomingTopics, moduleDocG.title, aiPathTitle
                     );
                     profileG.markModified(pathIdG ? 'paths' : 'currentPath');
                     await profileG.save();
@@ -563,6 +614,8 @@ exports.updateCourseModules = async (req, res) => {
                         quizPublishedBeginner:     t.quizPublishedBeginner     || false,
                         quizPublishedIntermediate: t.quizPublishedIntermediate || false,
                         quizPublishedAdvanced:     t.quizPublishedAdvanced     || false,
+                        content:                   t.content     ?? null,
+                        description:               t.description ?? '',
                     };
                 }
             }
@@ -579,6 +632,8 @@ exports.updateCourseModules = async (req, res) => {
                     quizPublishedBeginner:     flags.quizPublishedBeginner     || t.quizPublishedBeginner     || false,
                     quizPublishedIntermediate: flags.quizPublishedIntermediate || t.quizPublishedIntermediate || false,
                     quizPublishedAdvanced:     flags.quizPublishedAdvanced     || t.quizPublishedAdvanced     || false,
+                    content:     (t.content     != null && t.content     !== '') ? t.content     : flags.content,
+                    description: (t.description != null && t.description !== '') ? t.description : flags.description,
                 };
             }),
         }));

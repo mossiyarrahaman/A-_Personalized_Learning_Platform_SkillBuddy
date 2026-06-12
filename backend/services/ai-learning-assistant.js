@@ -5,6 +5,7 @@
 
 const axios = require('axios');
 const { TEACHER_PERSONA_SYSTEM } = require('../prompts/teacherPersona');
+const { buildResourceLink } = require('../utils/resourceLinkBuilder');
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const AI_MODEL = process.env.AI_MODEL || 'qwen/qwen3.5-9b';
@@ -85,14 +86,15 @@ OUTPUT FORMAT: Respond with ONLY valid JSON — no text before or after:
 {
   "recommended_resources": [
     {
-      "title": "Resource Title",
+      "title": "Specific, searchable resource title — e.g. 'JavaScript Promises Explained by Fireship' or 'Array.prototype.map() - JavaScript | MDN'",
       "type": "video | article | pdf",
-      "url": "https://...",
       "difficulty": "beginner | intermediate | advanced",
       "reason": "One warm, jargon-free sentence that tells the student WHY this resource is worth their time — written as a teacher would say it out loud"
     }
   ]
-}`;
+}
+
+IMPORTANT: Do NOT include url, URL, link, or href fields of any kind. Do NOT reference specific YouTube video IDs, Wikipedia URLs, or platform-specific article URLs. Provide ONLY the resource title and type. The system generates URLs automatically. Hallucinated URLs are a critical failure mode we are preventing.`;
 
     const prompt = `TASK: Resource Recommendation
 
@@ -109,7 +111,14 @@ Rules:
 
     try {
         const response = await callAI(prompt, 2000, systemMsg);
-        return parseJSON(response);
+        const parsed = parseJSON(response);
+        if (parsed.recommended_resources && Array.isArray(parsed.recommended_resources)) {
+            parsed.recommended_resources = parsed.recommended_resources.map(r => ({
+                ...r,
+                url: buildResourceLink({ title: r.title || '', type: r.type || 'article' })
+            }));
+        }
+        return parsed;
     } catch (error) {
         console.error('Resource recommendation failed:', error);
         return { recommended_resources: [] };

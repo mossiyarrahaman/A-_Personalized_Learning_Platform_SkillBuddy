@@ -30,6 +30,7 @@ const courseSchema = new mongoose.Schema({
             id: String,
             title: String,
             description: String,
+            content: { type: String, default: null },
 
             // Teacher Tracking
             teacherStatus: { type: String, enum: ['not_covered', 'in_progress', 'completed'], default: 'not_covered' },

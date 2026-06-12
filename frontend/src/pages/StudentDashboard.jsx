@@ -5,7 +5,7 @@ import RoadmapTree from '../components/RoadmapTree';
 import TopicDetailModal from '../components/TopicDetailModal';
 import ResumeCard from '../components/ResumeCard';
 import TutorChat from '../components/TutorChat';
-import { useAppTheme } from '../hooks/Useapptheme';
+import { useAppTheme } from '../hooks/useAppTheme';
 import api from '../api/axios';
 import { getClientMeta } from '../utils/clientMeta';
 import { emitAnalyticsChanged } from '../utils/analyticsEvents';

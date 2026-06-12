@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Menu, BarChart, BookOpen, Trophy, LogOut, Home, MessageSquare, User } from 'lucide-react';
-import { useAppTheme } from '../hooks/Useapptheme';
+import { useAppTheme } from '../hooks/useAppTheme';
 
 const Sidebar = ({ onLogout }) => {
     const [isCollapsed, setIsCollapsed] = useState(false);

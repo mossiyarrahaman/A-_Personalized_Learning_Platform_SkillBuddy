@@ -217,8 +217,6 @@ progressSchema.methods.computeRiskFlag = function (totalTopicsInCourse) {
     }
 };
 
-progressSchema.index({ student: 1, course: 1 }, { unique: true });
-progressSchema.index({ course: 1, riskFlag: 1 });
 progressSchema.index({ course: 1, lastAccessed: -1 });
 progressSchema.index({ course: 1, 'topicQuizScores.difficultyTier': 1 });
 

@@ -4,7 +4,9 @@
 // ============================================================================
 
 const axios = require('axios');
-const { TEACHER_PERSONA_SYSTEM, buildTopicGuidePrompt } = require('../prompts/teacherPersona');
+const { TEACHER_PERSONA_SYSTEM } = require('../prompts/teacherPersona');
+const { TEACHER_CONTENT_PERSONA_SYSTEM, buildTopicGuideUserPrompt } = require('../prompts/teacherContentPersona');
+const { buildResourceLink } = require('../utils/resourceLinkBuilder');
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const AI_MODEL = process.env.AI_MODEL || 'qwen/qwen-2.5-7b-instruct';
@@ -269,18 +271,29 @@ Field: ${safeField}, Level: ${safeLevel}.`;
 // Generates a standalone markdown topic guide using the teacher persona.
 // Returns a raw markdown string — no JSON wrapper.
 // ============================================================================
-async function generateTopicGuide(field, level, topicTitle, topicDescription = '', priorTopics = [], contextChunks = '') {
-  const userMsg = buildTopicGuidePrompt({
-    topicTitle,
-    topicDescription: topicDescription || `Introduction to ${topicTitle}`,
+async function generateTopicGuide(
+  field,
+  level,
+  topicTitle,
+  topicDescription = '',
+  priorTopics = [],
+  upcomingTopics = [],
+  moduleTitle = '',
+  courseOrPathTitle = ''
+) {
+  const userMsg = buildTopicGuideUserPrompt({
     field: field || 'General',
     level: level || 'Intermediate',
+    topicTitle,
+    topicDescription: topicDescription || '',
     priorTopics,
-    contextChunks,
+    upcomingTopics,
+    moduleTitle,
+    courseOrPathTitle,
   });
 
   try {
-    let response = await callOpenRouter(userMsg, 1400, 0.78, TEACHER_PERSONA_SYSTEM);
+    let response = await callOpenRouter(userMsg, 1800, 0.7, TEACHER_CONTENT_PERSONA_SYSTEM);
     // Strip <think> reasoning blocks some models emit before the real answer
     response = response.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
     return response;
@@ -546,33 +559,29 @@ Return ONLY valid JSON. No text before or after the JSON object.
       "resources": [
         {
           "type": "youtube",
-          "title": "Specific video title that actually exists on this channel",
-          "platform": "YouTube · Traversy Media",
-          "url": "https://www.youtube.com/watch?v=REAL_VIDEO_ID",
+          "title": "Specific, searchable video title — e.g. 'JavaScript Promises Explained in 10 Minutes by Fireship'",
+          "platform": "YouTube · Fireship",
           "duration": "12 min",
           "description": "One sentence: exactly what concept this video teaches and why it helps at this step."
         },
         {
           "type": "article",
-          "title": "Specific documentation page or authoritative article title",
+          "title": "Specific documentation page or guide title — e.g. 'Array.prototype.map() - JavaScript | MDN'",
           "platform": "MDN Web Docs",
-          "url": "https://developer.mozilla.org/en-US/docs/SPECIFIC_PAGE",
           "duration": "8 min read",
           "description": "One sentence: what the student will specifically learn from reading this."
         },
         {
           "type": "practice",
-          "title": "Specific interactive exercise or challenge title",
+          "title": "Specific exercise title — e.g. 'Basic JavaScript: Use the map Method to Extract Data from an Array'",
           "platform": "freeCodeCamp",
-          "url": "https://www.freecodecamp.org/learn/SPECIFIC_SECTION",
           "duration": "30 min",
           "description": "One sentence: what the student will build or practice in this exercise."
         },
         {
           "type": "reference",
-          "title": "Quick reference guide or cheatsheet title",
+          "title": "Specific cheatsheet or quick-reference title — e.g. 'JavaScript Array Methods Cheatsheet'",
           "platform": "DevDocs.io",
-          "url": "https://devdocs.io/TECHNOLOGY",
           "duration": "Reference",
           "description": "One sentence: what this cheatsheet covers for quick lookup while coding."
         }
@@ -590,7 +599,7 @@ Rules:
 - exampleExplanation: 2-3 sentences explaining the example.
 - keyPoints: exactly 3 short bullet facts.
 - commonMistake: one actionable sentence.
-- resources: exactly 4 — (1) youtube: real video from a reputable educational channel like Traversy Media, Fireship, The Net Ninja, Kevin Powell, Academind, CS50, or freeCodeCamp — use a real watch?v= URL not a search URL; (2) article: direct link to official docs or a trusted guide like MDN, CSS-Tricks, web.dev, Real Python, or official language/framework docs — use a specific page URL not a homepage; (3) practice: interactive exercise from freeCodeCamp, Exercism, JavaScript30, CodePen, or Scrimba — use a specific section URL not a homepage; (4) reference: cheatsheet or quick-reference from DevDocs, QuickRef.ME, or CSS-Tricks — for fast syntax lookup while coding. Each resource must include platform, duration, and description fields. Choose resources appropriate for a ${level} learner.
+- resources: exactly 4 — (1) youtube: a SPECIFIC, SEARCHABLE video title from Traversy Media, Fireship, The Net Ninja, Kevin Powell, Academind, CS50, or freeCodeCamp — include the channel name in the title for specificity; (2) article: a SPECIFIC documentation page or guide title from MDN, CSS-Tricks, web.dev, Real Python, or official language/framework docs — precise enough to search for; (3) practice: a SPECIFIC exercise title from freeCodeCamp, Exercism, JavaScript30, CodePen, or Scrimba; (4) reference: a SPECIFIC cheatsheet title from DevDocs, QuickRef.ME, or CSS-Tricks. Do NOT include url, URL, link, or href fields of any kind. Do NOT reference specific YouTube video IDs, Wikipedia URLs, or platform-specific article URLs. Provide ONLY the resource title and type. The system generates URLs automatically. Hallucinated URLs are a critical failure mode we are preventing. Each resource must include platform, duration, and description fields. Choose resources appropriate for a ${level} learner.
 - objectives: exactly 3 outcomes starting with "Student will".
 Field: ${field}, Level: ${level}, Topic: ${topicTitle}`;
 
@@ -616,7 +625,7 @@ Field: ${field}, Level: ${level}, Topic: ${topicTitle}`;
       resources: Array.isArray(s.resources) ? s.resources.slice(0, 4).map(r => ({
         type: (r.type || 'article').toLowerCase(),
         title: r.title || 'Resource',
-        url: r.url || '#',
+        url: buildResourceLink({ title: r.title, type: r.type || 'article' }),
         platform: r.platform || '',
         duration: r.duration || '',
         description: r.description || ''
@@ -662,34 +671,34 @@ Field: ${field}, Level: ${level}, Topic: ${topicTitle}`;
         resources: [
           {
             type: 'youtube',
-            title: `${sub.title} – Full Tutorial`,
+            title: `${sub.title} ${topicTitle} Full Tutorial freeCodeCamp`,
             platform: 'YouTube · freeCodeCamp',
             duration: '~20 min',
-            url: 'https://www.youtube.com/@freecodecamp/search?query=' + encodeURIComponent(`${sub.title} ${topicTitle}`),
+            url: buildResourceLink({ title: `${sub.title} ${topicTitle} Full Tutorial freeCodeCamp`, type: 'youtube' }),
             description: `Watch a structured tutorial on ${sub.title} from freeCodeCamp's educational channel.`
           },
           {
             type: 'article',
-            title: `${sub.title} — MDN Web Docs`,
+            title: `${sub.title} ${topicTitle} MDN Web Docs`,
             platform: 'MDN Web Docs',
             duration: '~10 min read',
-            url: 'https://developer.mozilla.org/en-US/search?q=' + encodeURIComponent(`${sub.title} ${topicTitle}`),
+            url: buildResourceLink({ title: `${sub.title} ${topicTitle} MDN Web Docs`, type: 'article' }),
             description: `Read the official, authoritative documentation for ${sub.title}.`
           },
           {
             type: 'practice',
-            title: `Practice ${sub.title} — freeCodeCamp`,
+            title: `Practice ${sub.title} ${topicTitle} freeCodeCamp`,
             platform: 'freeCodeCamp',
             duration: '~30 min',
-            url: 'https://www.freecodecamp.org/learn',
+            url: buildResourceLink({ title: `Practice ${sub.title} ${topicTitle} freeCodeCamp`, type: 'practice' }),
             description: `Complete interactive exercises on ${sub.title} with immediate feedback and certification.`
           },
           {
             type: 'reference',
-            title: `${topicTitle} Quick Reference — DevDocs`,
+            title: `${topicTitle} ${sub.title} Quick Reference DevDocs`,
             platform: 'DevDocs.io',
             duration: 'Reference',
-            url: 'https://devdocs.io',
+            url: buildResourceLink({ title: `${topicTitle} ${sub.title} Quick Reference DevDocs`, type: 'reference' }),
             description: `Use DevDocs as a fast offline-capable API reference for ${topicTitle} syntax and methods.`
           }
         ]
