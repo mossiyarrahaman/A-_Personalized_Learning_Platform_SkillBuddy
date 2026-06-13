@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 // backend/prompts/teacherContentPersona.js
 //
 // Voice and quality standards for AI-generated learning content (not conversation).
@@ -184,6 +184,25 @@ only the activation function from Sigmoid to ReLU, re-run it for 5 epochs, and
 note whether the loss curve converged faster or plateaued at a lower value" is
 specific.
 
+CRITICAL: The MNIST/neural-network examples in this section are
+ILLUSTRATIONS of what specificity looks like, not templates to
+copy. Apply the SAME LEVEL of specificity using the actual FIELD
+you're teaching:
+
+  - Teaching React? Reference real packages (react-query, zod,
+    framer-motion) and real Hooks (useState, useEffect, useMemo)
+    with real code, not MNIST.
+  - Teaching backend? Reference real libraries (Express, FastAPI,
+    Prisma) and real endpoints, not ML datasets.
+  - Teaching algorithms? Reference real test cases with concrete
+    input sizes and expected runtimes, not training accuracy.
+
+Match your examples to the FIELD parameter. A REST API topic that
+references MNIST has bled vocabulary from the wrong domain. Same
+specificity bar, different domain content. NEVER copy "MNIST,"
+"neural network," "training loss," "test accuracy," etc. into
+topics that aren't ML topics.
+
 ═══════════════════════════════════════════════════════════════════════════════
 DEPENDENCY AWARENESS
 ═══════════════════════════════════════════════════════════════════════════════
@@ -255,6 +274,54 @@ HARD RULES
    students up, address THAT specific tripping point ("Students
    get stuck on X because they confuse it with Y — here's how to
    tell them apart") rather than reassuring vaguely.
+
+9. NEVER end with meta-commentary about your own output. No "this
+     response meets all the criteria," no "I have covered the key
+     points," no "by following this guide you will master X." The
+     lesson ends when the teaching ends. The final paragraph should
+     be content, not a self-grading summary.
+
+10. WHEN CURRICULUM CONTEXT IS PROVIDED (priorTopics or
+     upcomingTopics arrays exist and are non-empty), name AT LEAST
+     ONE topic by its exact title in your output using a bridging
+     sentence. Examples:
+       - "Building on [PRIOR_TOPIC_NAME] from the previous module..."
+       - "You learned [SPECIFIC_CONCEPT] in [PRIOR_TOPIC_NAME];
+          we're going to use that here."
+       - "What you build here is what [UPCOMING_TOPIC_NAME] uses
+          in the next module."
+       - "Get this solid — [UPCOMING_TOPIC_NAME] depends on it."
+
+     The reference must use the EXACT title from the curriculum
+     context lists. Don't paraphrase. If priorTopics has "Loss
+     Functions" listed, write "Loss Functions" — not "what you
+     learned about losses" or "the loss material from earlier."
+     Exact title.
+
+     If neither array has any items, this rule does not apply.
+
+11. WHEN WRITING A LEARNING ROADMAP (multi-module sequences),
+     every module after the first must have a bridge sentence in
+     its description that explicitly references what the PREVIOUS
+     module taught.
+
+     Bridge sentence templates (use these forms):
+       - "Now that you've [done thing from Module N-1], this
+          module shows..."
+       - "Building on the [concept/skill] from [previous module
+          title], you'll..."
+       - "With [prior module's deliverable] working, this module
+          layers in..."
+
+     The bridge does not need to be the first sentence — it can
+     open the description or close it — but it MUST exist for
+     every module beyond the first in each phase.
+
+     Module 1 of each phase is exempt (it's the entry point).
+     Module 1 of Phase 2+ should bridge from the LAST module of
+     the previous phase: "By Phase 1 you built X; in this phase
+     you'll extend that to..."
+
 
 ═══════════════════════════════════════════════════════════════════════════════
 THE SHAPE OF A GOOD RESPONSE
@@ -394,8 +461,288 @@ function buildTopicGuideUserPrompt({
     return parts.join('\n\n');
 }
 
+
+// ============================================================================
+// buildTopicStepPlanUserPrompt
+// Per-call user prompt for generateTopicStepPlan.
+// Incorporates curriculum context and forces the concrete JSON shape the
+// frontend consumes (exampleCode / exampleExplanation field names).
+// Appends CONTENT_QUALITY_INSTRUCTIONS as a final self-check.
+// ============================================================================
+
+function buildTopicStepPlanUserPrompt({
+    field = '',
+    level = '',
+    topicTitle = '',
+    topicDescription = '',
+    priorTopics = [],
+    upcomingTopics = [],
+    moduleTitle = '',
+    courseOrPathTitle = '',
+    numSteps = 4,
+} = {}) {
+    const parts = [];
+
+    parts.push('TOPIC: ' + topicTitle);
+
+    if (topicDescription) {
+        parts.push('Description: ' + topicDescription);
+    }
+
+    if (courseOrPathTitle) {
+        parts.push('COURSE / PATH: ' + courseOrPathTitle);
+    }
+    if (moduleTitle) {
+        parts.push('MODULE: ' + moduleTitle);
+    }
+
+    parts.push('LEARNER LEVEL: ' + (level || 'Intermediate') + ' (writing should match this skill level)');
+    parts.push('FIELD: ' + (field || 'General'));
+
+    if (Array.isArray(priorTopics) && priorTopics.length > 0) {
+        const capped = priorTopics.slice(-5).reverse();
+        parts.push(
+            'TOPICS THE STUDENT HAS ALREADY COVERED (most recent first, up to the last 5):\n' +
+            capped.map(t => '  - ' + t).join('\n')
+        );
+    }
+
+    if (Array.isArray(upcomingTopics) && upcomingTopics.length > 0) {
+        const capped = upcomingTopics.slice(0, 3);
+        parts.push(
+            'TOPICS COMING UP NEXT (next 3):\n' +
+            capped.map(t => '  - ' + t).join('\n')
+        );
+    }
+
+    const jsonSchema = [
+        '{',
+        '  "objectives": [',
+        '    "Student will be able to ...",',
+        '    "Student will be able to ...",',
+        '    "Student will understand ..."',
+        '  ],',
+        '  "estimatedTime": "Realistic total time, e.g. 2-3 hours",',
+        '  "steps": [',
+        '    {',
+        '      "title": "Short step title — 2 to 5 words",',
+        '      "estimatedTime": "Per-step estimate, e.g. 25 min",',
+        '      "explanation": "Main teaching prose. Markdown OK. Follow the 6-move arc where it fits: problem → intuition → mechanics → decisions → mistakes → next. Pick the 2-3 moves that fit this step. 3-5 sentences minimum.",',
+        '      "teacherNote": "ONE specific insight a real teacher would share — something not in any textbook.",',
+        '      "exampleCode": "ONE concrete code example as a PLAIN STRING — NO backtick fences. The frontend wraps this in a code block automatically. Write real code with specific values, not placeholders like yourVariable or <your_value>. Return empty string if no example fits this step.",',
+        '      "exampleExplanation": "2-3 sentences explaining what the example shows and WHY it was written that way.",',
+        '      "keyPoints": [',
+        '        "Decision-helping or memory-anchoring bullet. NOT a restatement of the explanation. 2-4 bullets max."',
+        '      ],',
+        '      "commonMistake": "Specific bear-trap for THIS material at THIS step: what it looks like, why students fall into it, how to self-diagnose, and the fix.",',
+        '      "action": "ONE specific post-step task: concrete starting point + specific change/experiment + specific thing to observe. Swap-test: would this action still make sense for a different topic? If yes, rewrite it."',
+        '    }',
+        '  ]',
+        '}'
+    ].join('\n');
+
+    parts.push(
+        '──────────────────────────────────────────────────────────────────\n\n' +
+        'Break the topic "' + topicTitle + '" into ' + numSteps + ' sequential learning steps. ' +
+        'Each step must build directly on the previous one — a student cannot skip ahead.\n\n' +
+        'Return a JSON object with this EXACT structure. No extra fields, no markdown wrapper, ' +
+        'no text before or after the JSON object:\n\n' +
+        jsonSchema + '\n\n' +
+        'Hard requirements:\n' +
+        '  - Exactly ' + numSteps + ' steps. Each step builds on the previous.\n' +
+        '  - objectives: exactly 3 items, each starting with "Student will".\n' +
+        '  - The LAST step must leave the student with a working artifact or a demonstrable skill — not just comprehension.\n' +
+        '  - keyPoints: 2-4 bullets per step. Bullets must help the student make a decision or remember the right thing — never restate the explanation.\n' +
+        '  - JSON must parse. No JavaScript comments, no trailing commas, no text outside the JSON object.\n' +
+        '  - ALWAYS include every key in every step. If a field has no content, set its VALUE to empty string — never omit a key and never write a bare empty string without a property name.'
+    );
+
+    parts.push(CONTENT_QUALITY_INSTRUCTIONS.trim());
+
+    return parts.join('\n\n');
+}
+
+
+// ============================================================================
+// buildLearningPathUserPrompt
+// Per-call user prompt for generateLearningPath.
+// Generates a full curriculum roadmap (phases → modules → topics → subtopics).
+// Appends CONTENT_QUALITY_INSTRUCTIONS as a final self-check.
+// ============================================================================
+
+function buildLearningPathUserPrompt({
+    field = '',
+    level = '',
+    background = '',
+    goals = '',
+    numPhases = 3,
+} = {}) {
+    const parts = [];
+
+    parts.push('GOAL: Generate a complete learning roadmap for a student studying to become a ' + (field || 'developer') + '.');
+
+    parts.push('LEVEL: ' + (level || 'beginner') + ' (writing should target this skill level)');
+
+    if (background) {
+        parts.push('STUDENT BACKGROUND: ' + background);
+    }
+
+    if (goals) {
+        parts.push('STUDENT GOALS: ' + goals);
+    }
+
+    parts.push(
+        'STRUCTURE (HARD REQUIREMENTS \u2014 not suggestions):\n' +
+        '- EXACTLY ' + numPhases + ' phases. The phases array MUST have exactly ' + numPhases + ' items. Never 1, never 2. Always ' + numPhases + '.\n' +
+        '- Even if the field seems small or basic, still produce ' + numPhases + ' phases by increasing depth: Phase 1 = core basics, Phase 2 = applied practice, Phase 3 = advanced patterns and production concerns.\n' +
+        '- Each phase has 3-5 modules (minimum 2 per phase)\n' +
+        '- Each module has 3-5 topics (be variable; not every module needs the same count)\n' +
+        '- Each topic has 3-5 subtopics (also variable)\n' +
+        '- Each MODULE has 1-2 practice projects'
+    );
+
+    parts.push(
+        'NARRATIVE ARC:\n' +
+        '- Phase 1 = foundations the student needs before anything advanced. By the end, the student can perform specific concrete tasks they could not at the start.\n' +
+        '- Phase 2 = applying foundations to real problems. By the end, the student has built specific real artifacts.\n' +
+        '- Phase 3 = depth, edge cases, and the harder topics in this domain.'
+    );
+
+    parts.push(
+        'PHASE GOAL DISCIPLINE:\n' +
+        'Phase goals must be specific capability statements, not vague aspirations.\n' +
+        'BAD: "Master deep learning techniques and their applications"\n' +
+        'GOOD: "By the end of this phase, the student can build a 2-layer neural network in NumPy, train it on tabular data, and diagnose training failures by reading the loss curve."\n' +
+        'Each goal names specific tools or techniques the student will be able to use and specific artifacts they will have built.'
+    );
+
+    parts.push(
+        'MODULE DEPENDENCY DISCIPLINE:\n' +
+        'Within a phase, Module 2 description must explicitly build on Module 1. Each subsequent module description bridges from the previous.\n' +
+        'Example bridge: "Now that you have built feedforward networks in Module 1, this module shows how convolutions encode spatial structure that dense layers cannot."\n' +
+        'Module descriptions should feel like a story, not a list.'
+    );
+
+    parts.push(
+        'PRACTICE PROJECT DISCIPLINE:\n' +
+        '- Each project: 2-8 hours of buildable work\n' +
+        '- Each project: uses at least 80% of the module topics\n' +
+        '- Each project description includes: starting point, concrete deliverable, success criterion\n' +
+        '- BANNED generic forms: "Build a project," "Apply what you have learned," "Practice these concepts," "Implement an example"\n' +
+        '\n' +
+        'Examples:\n' +
+        '  BAD: "Build a REST API"\n' +
+        '  GOOD: "Build a 3-endpoint movie review API in Express: POST /reviews (create), GET /reviews/:id (fetch one), GET /reviews?movie=X (filter). No database \u2014 use an in-memory array. Success = all three endpoints return correct JSON when tested with curl."\n' +
+        '\n' +
+        '  BAD: "Create a React project"\n' +
+        '  GOOD: "Build a habit tracker UI with React: add habit, mark complete for today, see a 7-day streak. State stays in useState; no backend yet. Success = three habits across three days each show the correct streak count."'
+    );
+
+    parts.push(
+        'TOPIC DESCRIPTION DISCIPLINE:\n' +
+        '- Topic descriptions are 1-2 sentences max\n' +
+        '- They name what the student will be able to DO after, not what is defined in the topic\n' +
+        '- Subtopics are concrete elements the topic teaches \u2014 structure, not commentary'
+    );
+
+    const jsonSchema =
+        'Return JSON only. No markdown wrapper, no preamble, no text before or after the JSON object.\n' +
+        'The response MUST contain exactly ' + numPhases + ' phases. Fill ALL ' + numPhases + ' phase objects.\n' +
+        '\n' +
+        'CRITICAL — MODULE DESCRIPTION PATTERN (copy this pattern for every module you write):\n' +
+        '  Module 1 of Phase 1: introduce the topic from scratch. No bridge needed.\n' +
+        '  Module 2+ of any phase: MUST include a bridge sentence naming the specific skill or\n' +
+        '    artifact from the PREVIOUS module. Forms to use:\n' +
+        '      "Now that you\'ve [specific thing from Module N-1], this module layers in [Y]."\n' +
+        '      "Building on the [concept] from [previous module title], you\'ll..."\n' +
+        '      "With [prior module deliverable] working, this module adds..."\n' +
+        '  Module 1 of Phase 2: bridge from Phase 1\'s last module.\n' +
+        '  Module 1 of Phase 3: bridge from Phase 2\'s last module.\n' +
+        '\n' +
+        'Schema (fill ALL THREE phase objects — do not stop after phase 1):\n' +
+        '{\n' +
+        '  "phases": [\n' +
+        '    {\n' +
+        '      "phase": 1,\n' +
+        '      "level": "beginner",\n' +
+        '      "title": "Phase 1 title (foundations)",\n' +
+        '      "goal": "By the end of phase 1, the student can [specific capability with specific tools].",\n' +
+        '      "modules": [\n' +
+        '        {\n' +
+        '          "title": "First module — entry point",\n' +
+        '          "description": "Introduce [core concept] from scratch. [What the student can do after this module, named specifically.]",\n' +
+        '          "topics": [ { "title": "...", "description": "...", "subtopics": ["...", "..."] } ],\n' +
+        '          "practiceProjects": ["Starting point + deliverable + success criterion."]\n' +
+        '        },\n' +
+        '        {\n' +
+        '          "title": "Second module — builds on Module 1",\n' +
+        '          "description": "Now that you\'ve [specific skill/artifact from Module 1 title], this module layers in [what comes next]. [Continues the story.]",\n' +
+        '          "topics": [ { "title": "...", "description": "...", "subtopics": ["...", "..."] } ],\n' +
+        '          "practiceProjects": ["Starting point + deliverable + success criterion."]\n' +
+        '        }\n' +
+        '      ]\n' +
+        '    },\n' +
+        '    {\n' +
+        '      "phase": 2,\n' +
+        '      "level": "intermediate",\n' +
+        '      "title": "Phase 2 title (applied practice)",\n' +
+        '      "goal": "By the end of phase 2, the student can [specific applied capability].",\n' +
+        '      "modules": [\n' +
+        '        {\n' +
+        '          "title": "First Phase 2 module — cross-phase bridge",\n' +
+        '          "description": "By the end of Phase 1 you built [Phase 1 last-module deliverable]. This module extends that by [what Phase 2 adds].",\n' +
+        '          "topics": [ { "title": "...", "description": "...", "subtopics": ["...", "..."] } ],\n' +
+        '          "practiceProjects": ["Starting point + deliverable + success criterion."]\n' +
+        '        },\n' +
+        '        {\n' +
+        '          "title": "Second Phase 2 module — builds on Phase 2 Module 1",\n' +
+        '          "description": "Now that you\'ve [specific skill/artifact from Phase 2 Module 1], this module layers in [what comes next].",\n' +
+        '          "topics": [ { "title": "...", "description": "...", "subtopics": ["...", "..."] } ],\n' +
+        '          "practiceProjects": ["Starting point + deliverable + success criterion."]\n' +
+        '        }\n' +
+        '      ]\n' +
+        '    },\n' +
+        '    {\n' +
+        '      "phase": 3,\n' +
+        '      "level": "advanced",\n' +
+        '      "title": "Phase 3 title (depth and production)",\n' +
+        '      "goal": "By the end of phase 3, the student can [advanced production-ready capability].",\n' +
+        '      "modules": [\n' +
+        '        {\n' +
+        '          "title": "First Phase 3 module — cross-phase bridge",\n' +
+        '          "description": "With [Phase 2 capability] in place, this phase goes deeper into [Phase 3 concern].",\n' +
+        '          "topics": [ { "title": "...", "description": "...", "subtopics": ["...", "..."] } ],\n' +
+        '          "practiceProjects": ["Starting point + deliverable + success criterion."]\n' +
+        '        },\n' +
+        '        {\n' +
+        '          "title": "Second Phase 3 module — builds on Phase 3 Module 1",\n' +
+        '          "description": "Now that you\'ve [specific skill/artifact from Phase 3 Module 1], this module layers in [what comes next].",\n' +
+        '          "topics": [ { "title": "...", "description": "...", "subtopics": ["...", "..."] } ],\n' +
+        '          "practiceProjects": ["Starting point + deliverable + success criterion."]\n' +
+        '        }\n' +
+        '      ]\n' +
+        '    }\n' +
+        '  ]\n' +
+        '}\n' +
+        '\n' +
+        'Expand each phase with the full 3-5 modules and 3-5 topics per module. The schema above is a two-module skeleton — fill it completely.\n' +
+        'For Module 3, 4, 5 within each phase: continue the bridge pattern — each description references the previous module by name.';
+
+    parts.push(jsonSchema);
+
+    parts.push(
+        'QUALITY CHECK \u2014 applies to prose content of goal, module descriptions, topic descriptions, and practiceProjects. ' +
+        'Do NOT change the JSON format or output structure. The response must still be the JSON object above.\n\n' +
+        CONTENT_QUALITY_INSTRUCTIONS.trim()
+    );
+
+    return parts.join('\n\n');
+}
+
 module.exports = {
     TEACHER_CONTENT_PERSONA_SYSTEM,
     CONTENT_QUALITY_INSTRUCTIONS,
     buildTopicGuideUserPrompt,
+    buildTopicStepPlanUserPrompt,
+    buildLearningPathUserPrompt,
 };

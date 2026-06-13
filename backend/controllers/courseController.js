@@ -5,6 +5,7 @@ const User = require('../models/User'); // Added User model
 const Reflection = require('../models/Reflection');
 const aiService = require('../services/ai-service');
 const { retrieveRelevantChunks } = require('../services/retrievalService');
+const { walkCurriculumContext } = require('../utils/curriculumWalker');
 
 // Increment streak if a new calendar day has started since last activity
 async function refreshStreak(userId) {
@@ -33,14 +34,14 @@ function resolvePathContainer(profile, pathId) {
 
 exports.generatePath = async (req, res) => {
     try {
-        const { field, level, goals, quizResults } = req.body;
+        const { field, level, goals, quizResults, background } = req.body;
         const userId = req.user.id;
 
         console.log(`Generating path for user ${userId} in ${field} (${level})`);
 
         let pathData;
         try {
-            pathData = await aiService.generateLearningPath(field, level, goals, quizResults);
+            pathData = await aiService.generateLearningPath(field, level, goals, quizResults, background || '');
         } catch (e) {
             console.error("AI Generation failed", e);
             return res.status(500).json({ error: "Failed to generate learning path via AI" });
@@ -50,27 +51,35 @@ exports.generatePath = async (req, res) => {
         if (profile) {
             profile.onboarding = { field, level, goals, completed: true };
 
+            // Flatten phases -> modules for MongoDB storage
+            const _rawModules1 = (pathData.phases || []).flatMap((ph) =>
+                (ph.modules || []).map((m) => ({
+                    ...m,
+                    difficultyLevel: ph.level || 'beginner',
+                    goalStatement: ph.goal || m.description || '',
+                    duration: '2-3 weeks',
+                }))
+            );
             profile.currentPath = {
                 generatedAt: new Date(),
-                modules: pathData.modules.map((m, mIdx) => ({
+                modules: _rawModules1.map((m, mIdx) => ({
                     id: `module_${Date.now()}_${mIdx}`,
                     title: m.title,
                     description: m.description,
-                    duration: m.duration,
+                    duration: m.duration || '2-3 weeks',
                     difficultyLevel: m.difficultyLevel || 'beginner',
                     goalStatement: m.goalStatement || '',
                     practiceProjects: Array.isArray(m.practiceProjects) ? m.practiceProjects : [],
                     status: 'locked',
-                    topics: (m.topics || []).map((t, tIdx) => ({
+                    topics: (m.topics || []).map((t) => ({
                         id: Math.random().toString(36).substr(2, 9),
                         title: t.title,
                         description: t.description,
                         status: 'pending',
-                        // ── Map subtopics from AI response ──
-                        subtopics: (t.subtopics || []).map((s, sIdx) => ({
+                        subtopics: (t.subtopics || []).map((s) => ({
                             id: Math.random().toString(36).substr(2, 9),
-                            title: s.title,
-                            description: s.description,
+                            title: typeof s === 'string' ? s : (s.title || ''),
+                            description: typeof s === 'string' ? '' : (s.description || ''),
                             status: 'pending'
                         })),
                         resources: []
@@ -305,23 +314,8 @@ exports.getTopicDetails = async (req, res) => {
                 const field = course.field || course.title || 'General';
                 const level = course.level || 'beginner';
                 try {
-                    // Walk course.modules to build curriculum context for dependency awareness
-                    const tcPriorTopics = [];
-                    const tcUpcomingTopics = [];
-                    let tcFoundCurrent = false;
-                    const currentTopicKey = topicDoc.id || topicDoc._id?.toString();
-                    for (const m of course.modules) {
-                        for (const t of m.topics) {
-                            const tKey = t.id || t._id?.toString();
-                            if (tKey === currentTopicKey) {
-                                tcFoundCurrent = true;
-                            } else if (!tcFoundCurrent) {
-                                tcPriorTopics.push(t.title);
-                            } else {
-                                tcUpcomingTopics.push(t.title);
-                            }
-                        }
-                    }
+                    const { priorTopics: tcPriorTopics, upcomingTopics: tcUpcomingTopics } =
+                        walkCurriculumContext(course.modules, moduleId, topicId);
                     topicDoc.content = await aiService.generateTopicGuide(
                         field, level, topicDoc.title, topicDoc.description || '',
                         tcPriorTopics, tcUpcomingTopics, moduleDoc.title, course.title
@@ -361,13 +355,19 @@ exports.getTopicDetails = async (req, res) => {
                 if (topicToUpdate) {
                     const field = container2.onboarding?.field || profile.onboarding.field;
                     const level = container2.onboarding?.level || profile.onboarding.level;
+                    const { priorTopics: spPriorTopics, upcomingTopics: spUpcomingTopics } =
+                        walkCurriculumContext(container2.modules, moduleId, topicId);
                     console.log(`Generating step plan for topic: ${topicToUpdate.title}`);
                     const planData = await aiService.generateTopicStepPlan(
                         field,
                         level,
                         topicToUpdate.title,
                         moduleDoc2.title,
-                        topicToUpdate.subtopics || []
+                        topicToUpdate.subtopics || [],
+                        spPriorTopics,
+                        spUpcomingTopics,
+                        topicToUpdate.description || '',
+                        `${field} Learning Path`
                     );
 
                     topicToUpdate.plan = {
@@ -395,23 +395,8 @@ exports.getTopicDetails = async (req, res) => {
                 if (topicToUpdate && !topicToUpdate.content) {
                     const field = containerG.onboarding?.field || profileG.onboarding.field;
                     const level = containerG.onboarding?.level || profileG.onboarding.level;
-                    // Walk path modules to build curriculum context for dependency awareness
-                    const aiPriorTopics = [];
-                    const aiUpcomingTopics = [];
-                    let aiFoundCurrent = false;
-                    const currentTopicKey = topicToUpdate.id || topicToUpdate._id?.toString();
-                    for (const m of containerG.modules) {
-                        for (const t of m.topics) {
-                            const tKey = t.id || t._id?.toString();
-                            if (tKey === currentTopicKey) {
-                                aiFoundCurrent = true;
-                            } else if (!aiFoundCurrent) {
-                                aiPriorTopics.push(t.title);
-                            } else {
-                                aiUpcomingTopics.push(t.title);
-                            }
-                        }
-                    }
+                    const { priorTopics: aiPriorTopics, upcomingTopics: aiUpcomingTopics } =
+                        walkCurriculumContext(containerG.modules, moduleId, topicId);
                     const aiPathTitle = `${field} Learning Path`;
                     console.log(`Generating topic guide for: ${topicToUpdate.title}`);
                     topicToUpdate.content = await aiService.generateTopicGuide(
@@ -1132,6 +1117,8 @@ exports.refreshTopicPlan = async (req, res) => {
 
         const field = container.onboarding?.field || profile.onboarding.field;
         const level = container.onboarding?.level || profile.onboarding.level;
+        const { priorTopics: rfPriorTopics, upcomingTopics: rfUpcomingTopics } =
+            walkCurriculumContext(container.modules, moduleId, topicId);
 
         // Immediately regenerate the plan
         const planData = await aiService.generateTopicStepPlan(
@@ -1139,7 +1126,11 @@ exports.refreshTopicPlan = async (req, res) => {
             level,
             topicDoc.title,
             moduleDoc.title,
-            topicDoc.subtopics || []
+            topicDoc.subtopics || [],
+            rfPriorTopics,
+            rfUpcomingTopics,
+            topicDoc.description || '',
+            `${field} Learning Path`
         );
 
         topicDoc.plan = {
@@ -1540,12 +1531,12 @@ exports.submitTopicQuiz = async (req, res) => {
 
 exports.addCoursePath = async (req, res) => {
     try {
-        const { field, level, goals, quizResults } = req.body;
+        const { field, level, goals, quizResults, background } = req.body;
         const userId = req.user.id;
 
         let pathData;
         try {
-            pathData = await aiService.generateLearningPath(field, level, goals, quizResults);
+            pathData = await aiService.generateLearningPath(field, level, goals, quizResults, background || '');
         } catch (e) {
             console.error('AI Generation failed for extra path', e);
             return res.status(500).json({ error: 'Failed to generate learning path via AI' });
@@ -1554,14 +1545,23 @@ exports.addCoursePath = async (req, res) => {
         const exists = await StudentProfile.exists({ userId });
         if (!exists) return res.status(404).json({ error: 'Profile not found' });
 
+        // Flatten phases -> modules for MongoDB storage
+        const _rawModules2 = (pathData.phases || []).flatMap((ph) =>
+            (ph.modules || []).map((m) => ({
+                ...m,
+                difficultyLevel: ph.level || 'beginner',
+                goalStatement: ph.goal || m.description || '',
+                duration: '2-3 weeks',
+            }))
+        );
         const newPath = {
             onboarding: { field, level, goals },
             generatedAt: new Date(),
-            modules: pathData.modules.map((m, mIdx) => ({
+            modules: _rawModules2.map((m, mIdx) => ({
                 id: `module_${Date.now()}_${mIdx}`,
                 title: m.title,
                 description: m.description,
-                duration: m.duration,
+                duration: m.duration || '2-3 weeks',
                 difficultyLevel: m.difficultyLevel || 'beginner',
                 goalStatement: m.goalStatement || '',
                 practiceProjects: Array.isArray(m.practiceProjects) ? m.practiceProjects : [],
@@ -1573,8 +1573,8 @@ exports.addCoursePath = async (req, res) => {
                     status: 'pending',
                     subtopics: (t.subtopics || []).map((s) => ({
                         id: Math.random().toString(36).substr(2, 9),
-                        title: s.title,
-                        description: s.description,
+                        title: typeof s === 'string' ? s : (s.title || ''),
+                        description: typeof s === 'string' ? '' : (s.description || ''),
                         status: 'pending'
                     })),
                     resources: []
@@ -1610,6 +1610,29 @@ exports.getExtraPath = async (req, res) => {
     } catch (error) {
         console.error('Error getting extra path:', error);
         res.status(500).json({ error: 'Server error' });
+    }
+};
+
+exports.deleteAiPath = async (req, res) => {
+    try {
+        const { pathId } = req.params;
+        const userId = req.user.id;
+
+        const profile = await StudentProfile.findOne({ userId });
+        if (!profile) return res.status(404).json({ error: 'Profile not found' });
+
+        const pathExists = profile.paths.some(p => p._id.toString() === pathId);
+        if (!pathExists) return res.status(404).json({ error: 'Path not found or does not belong to you' });
+
+        await StudentProfile.findOneAndUpdate(
+            { userId },
+            { $pull: { paths: { _id: pathId } } }
+        );
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error deleting AI path:', error);
+        res.status(500).json({ error: 'Server error deleting path' });
     }
 };
 

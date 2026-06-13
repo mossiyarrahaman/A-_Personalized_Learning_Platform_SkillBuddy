@@ -48,5 +48,6 @@ router.post('/generate-resource-quiz', auth, courseController.generateResourceQu
 router.post('/paths', auth, courseController.addCoursePath);
 router.post('/paths/toggle-topic', auth, courseController.toggleExtraPathTopic);
 router.get('/paths/:pathId', auth, courseController.getExtraPath);
+router.delete('/paths/:pathId', auth, courseController.deleteAiPath);
 
 module.exports = router;

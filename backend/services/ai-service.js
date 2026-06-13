@@ -5,7 +5,7 @@
 
 const axios = require('axios');
 const { TEACHER_PERSONA_SYSTEM } = require('../prompts/teacherPersona');
-const { TEACHER_CONTENT_PERSONA_SYSTEM, buildTopicGuideUserPrompt } = require('../prompts/teacherContentPersona');
+const { TEACHER_CONTENT_PERSONA_SYSTEM, buildTopicGuideUserPrompt, buildTopicStepPlanUserPrompt, buildLearningPathUserPrompt } = require('../prompts/teacherContentPersona');
 const { buildResourceLink } = require('../utils/resourceLinkBuilder');
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -128,15 +128,20 @@ async function callOpenRouter(prompt, maxTokens = 4000, temperature = 0.7, syste
 }
 
 // ============================================================================
-// generateLearningPath  ← KEY FIX: better prompt + 8000 tokens + subtopics
+// generateLearningPath
+// Generates a full learning roadmap: phases -> modules -> topics -> subtopics.
+// Uses TEACHER_CONTENT_PERSONA_SYSTEM for quality and structure discipline.
+// Returns { phases: [...] } -- callers flatten to MongoDB format.
 // ============================================================================
-async function generateLearningPath(field, level, goals, quizResults = null) {
+async function generateLearningPath(field, level, goals, quizResults = null, background = '') {
   const safeField = sanitizePromptInput(field, 100);
   const safeLevel = VALID_LEVELS.has(level) ? level : 'intermediate';
-  const safeGoals = Array.isArray(goals)
+
+  const goalsStr = Array.isArray(goals)
     ? goals.map(g => sanitizePromptInput(g, 100)).join(', ')
-    : sanitizePromptInput(goals, 300);
-  const goalsText = safeGoals;
+    : sanitizePromptInput(goals || '', 300);
+
+  const safeBackground = sanitizePromptInput(background || '', 300);
 
   let quizContext = '';
   if (quizResults) {
@@ -145,127 +150,110 @@ async function generateLearningPath(field, level, goals, quizResults = null) {
     const percentage = (score / total) * 100;
     const weakTopics = quizResults.details?.filter(d => !d.isCorrect).map(d => d.topic).join(', ') || 'none';
     let instruction = percentage < 40
-      ? 'Student struggled. Include a Foundations module as Week 1.'
+      ? 'Student struggled. Phase 1 must cover absolute foundations before anything applied.'
       : percentage > 80
-        ? 'Student excelled. Skip basics, focus on advanced topics.'
-        : `Average performance. Cover weak topics early: ${weakTopics}.`;
-    quizContext = `\nDIAGNOSTIC: Score ${score}/${total} (${percentage.toFixed(0)}%). ${instruction}`;
+        ? 'Student excelled. Phase 1 can skip trivial basics and focus on intermediate foundations.'
+        : `Average performance. Cover weak areas early in Phase 1: ${weakTopics}.`;
+    quizContext = '\n\nDIAGNOSTIC: Score ' + score + '/' + total + ' (' + percentage.toFixed(0) + '%). ' + instruction;
   }
 
-  const prompt = `Create a learning roadmap for a ${safeLevel} student learning ${safeField}.
-Goals: ${goalsText}${quizContext}
+  const userMsg = buildLearningPathUserPrompt({
+    field: safeField,
+    level: safeLevel,
+    background: safeBackground || undefined,
+    goals: goalsStr ? goalsStr + (quizContext || '') : (quizContext || undefined),
+    numPhases: 3,
+  });
 
-Return ONLY valid JSON, no markdown, no extra text.
-IMPORTANT: Keep ALL descriptions under 12 words. Critical to avoid truncation.
-
-{
-  "modules": [
-    {
-      "title": "Phase Name (NO Week prefix — e.g. Foundation, Core Concepts, Advanced Patterns)",
-      "description": "One sentence overview under 12 words.",
-      "duration": "Estimated time e.g. 2 weeks",
-      "difficultyLevel": "beginner",
-      "goalStatement": "One sentence: what the student achieves in this phase.",
-      "practiceProjects": [
-        "Build a simple starter project",
-        "Complete a guided hands-on exercise"
-      ],
-      "topics": [
-        {
-          "title": "Short Topic Title",
-          "description": "What this topic covers in 10 words.",
-          "subtopics": [
-            { "title": "Subtopic Name", "description": "Brief 8-word description" },
-            { "title": "Subtopic Name", "description": "Brief 8-word description" },
-            { "title": "Subtopic Name", "description": "Brief 8-word description" },
-            { "title": "Subtopic Name", "description": "Brief 8-word description" }
-          ]
-        }
-      ]
-    }
-  ]
-}
-
-Rules:
-- Generate 5 to 7 phases progressing in difficulty.
-- difficultyLevel must be one of: beginner, intermediate, advanced, expert, production.
-- Phase titles must NOT start with "Week". Use descriptive names.
-- Each phase must have 5 to 8 topics. Each topic must have exactly 4 subtopics.
-- practiceProjects must have 2 to 3 short project ideas per phase.
-- goalStatement is one sentence describing what the student achieves.
-Field: ${safeField}, Level: ${safeLevel}.`;
-
+  let lastError = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
   try {
-    const response = await callOpenRouter(prompt, 8000);
+    const response = await callOpenRouter(userMsg, 5000, 0.7, TEACHER_CONTENT_PERSONA_SYSTEM);
     const cleaned = cleanJSONResponse(response);
-    const learningPath = JSON.parse(cleaned);
+    const roadmap = JSON.parse(cleaned);
 
-    if (!learningPath.modules || learningPath.modules.length === 0) {
-      throw new Error('No modules in response');
+    if (!Array.isArray(roadmap.phases) || roadmap.phases.length === 0) {
+      throw new Error('No phases in response');
+    }
+    if (roadmap.phases.length < 3) {
+      console.warn(`⚠️  generateLearningPath attempt ${attempt}: got ${roadmap.phases.length} phases, expected 3. ${attempt < 2 ? 'Retrying...' : 'Proceeding with partial output.'}`);
+      if (attempt < 2) throw new Error(`Only ${roadmap.phases.length} phases returned, expected 3`);
     }
 
-    console.log(`✅ generateLearningPath: ${learningPath.modules.length} modules, first module has ${learningPath.modules[0].topics?.length} topics`);
-    return learningPath;
+    // Normalise each phase and its modules
+    roadmap.phases = roadmap.phases.map((ph, phIdx) => ({
+      phase: ph.phase || phIdx + 1,
+      level: ph.level || safeLevel,
+      title: ph.title || `Phase ${phIdx + 1}`,
+      goal: ph.goal || '',
+      modules: (ph.modules || []).map((m) => ({
+        title: m.title || 'Untitled Module',
+        description: m.description || '',
+        topics: (m.topics || []).map((t) => ({
+          title: t.title || 'Untitled Topic',
+          description: t.description || '',
+          subtopics: Array.isArray(t.subtopics)
+            ? t.subtopics.map(s => (typeof s === 'string' ? { title: s, description: '' } : s))
+            : [],
+        })),
+        practiceProjects: Array.isArray(m.practiceProjects) ? m.practiceProjects : [],
+      })),
+    }));
+
+    const totalModules = roadmap.phases.reduce((sum, ph) => sum + ph.modules.length, 0);
+    const totalTopics  = roadmap.phases.reduce((sum, ph) =>
+      sum + ph.modules.reduce((ms, m) => ms + m.topics.length, 0), 0);
+    console.log(`✅ generateLearningPath: ${roadmap.phases.length} phases, ${totalModules} modules, ${totalTopics} topics for "${safeField}"`);
+    return roadmap;
 
   } catch (error) {
-    console.error('❌ generateLearningPath failed:', error.message);
-    // Fallback with phase-based structure so UI doesn't break
-    const fallbackTopics = (label) => ([
-      {
-        title: 'Core Concepts',
-        description: 'Fundamental ideas and terminology.',
-        subtopics: [
-          { title: 'Introduction', description: 'Overview and context' },
-          { title: 'Key Terms', description: 'Essential vocabulary to know' },
-          { title: 'Core Principles', description: 'Foundational rules and patterns' },
-          { title: 'Quick Reference', description: 'Summary and cheat sheet' }
-        ]
-      },
-      {
-        title: 'Hands-on Practice',
-        description: 'Apply concepts through exercises.',
-        subtopics: [
-          { title: 'Guided Exercise', description: 'Follow along with examples' },
-          { title: 'Mini Project', description: 'Build something from scratch' },
-          { title: 'Common Mistakes', description: 'Pitfalls and how to avoid them' },
-          { title: 'Self Assessment', description: 'Check your understanding' }
-        ]
-      }
-    ]);
-    return {
+    lastError = error;
+    console.error(`❌ generateLearningPath attempt ${attempt} failed:`, error.message);
+  }
+  } // end retry loop
+    const error = lastError;
+    console.error('❌ generateLearningPath failed after retries:', error?.message);
+    const fallbackPhase = (phaseNum, phLevel, title) => ({
+      phase: phaseNum,
+      level: phLevel,
+      title,
+      goal: `Build foundational ${safeField} skills.`,
       modules: [
         {
-          title: 'Foundation',
-          description: `Core ${field} fundamentals and setup.`,
-          duration: '2 weeks',
-          difficultyLevel: 'beginner',
-          goalStatement: `Understand the basics of ${field} and set up your environment.`,
-          practiceProjects: ['Build a starter project', 'Complete a guided exercise'],
-          topics: fallbackTopics('foundation')
-        },
-        {
           title: 'Core Concepts',
-          description: `Essential ${field} patterns and principles.`,
-          duration: '2 weeks',
-          difficultyLevel: 'intermediate',
-          goalStatement: `Apply core ${field} patterns with confidence.`,
-          practiceProjects: ['Build an intermediate project', 'Solve practice exercises'],
-          topics: fallbackTopics('core')
+          description: `Fundamental ${safeField} ideas and terminology.`,
+          topics: [
+            {
+              title: 'Introduction',
+              description: 'Overview and context.',
+              subtopics: [
+                { title: 'What this is', description: 'Overview' },
+                { title: 'Why it matters', description: 'Motivation' },
+                { title: 'Core vocabulary', description: 'Key terms' },
+              ],
+            },
+            {
+              title: 'Hands-on Practice',
+              description: 'Apply concepts through exercises.',
+              subtopics: [
+                { title: 'Guided exercise', description: 'Follow along with examples' },
+                { title: 'Mini project', description: 'Build something from scratch' },
+                { title: 'Common mistakes', description: 'Pitfalls and how to avoid them' },
+              ],
+            },
+          ],
+          practiceProjects: ['Complete the guided starter exercise for this module.'],
         },
-        {
-          title: 'Advanced Application',
-          description: `Advanced ${field} techniques and real projects.`,
-          duration: '2 weeks',
-          difficultyLevel: 'advanced',
-          goalStatement: `Build production-ready ${field} projects independently.`,
-          practiceProjects: ['Build a real-world project', 'Code review and refactor'],
-          topics: fallbackTopics('advanced')
-        }
-      ]
+      ],
+    });
+    return {
+      phases: [
+        fallbackPhase(1, 'beginner',     'Foundations'),
+        fallbackPhase(2, 'intermediate', 'Applied Practice'),
+        fallbackPhase(3, 'advanced',     'Depth and Mastery'),
+      ],
     };
-  }
 }
-
 // ============================================================================
 // generateTopicGuide
 // Generates a standalone markdown topic guide using the teacher persona.
@@ -512,103 +500,49 @@ function getAssessmentFallback() {
 // ============================================================================
 // generateTopicStepPlan  ← topic-wise step-by-step learning plan (teacher-grade)
 // ============================================================================
-async function generateTopicStepPlan(field, level, topicTitle, moduleTitle, subtopics = []) {
-  const subtopicList = subtopics.length > 0
-    ? subtopics.map((s, i) => `${i + 1}. "${s.title}"${s.description ? ` — ${s.description}` : ''}`).join('\n')
-    : `1. "${topicTitle} Basics"\n2. "Key Concepts"\n3. "Practical Application"\n4. "Best Practices"`;
-
+async function generateTopicStepPlan(
+  field,
+  level,
+  topicTitle,
+  moduleTitle,
+  subtopics = [],
+  priorTopics = [],
+  upcomingTopics = [],
+  topicDescription = '',
+  courseOrPathTitle = ''
+) {
   const stepCount = subtopics.length > 0 ? subtopics.length : 4;
 
-  const systemMsg = TEACHER_PERSONA_SYSTEM + `
+  // Build subtopic list for the prompt so the LLM titles steps correctly
+  const subtopicListText = subtopics.length > 0
+    ? subtopics.map((s, i) => `${i + 1}. "${s.title}"${s.description ? ` — ${s.description}` : ''}`).join('\n')
+    : null;
 
-OUTPUT FORMAT: Respond with ONLY valid JSON following the exact schema in the user message.
-Apply the teacher voice to all "explanation" and "teacherNote" string fields within the JSON.
-Use callout patterns (💡 Intuition: / 🔧 In practice: / ⚠️ Common mistake: / 🎯 Quick check:) inside explanation strings where they fit naturally.
-Represent line breaks inside JSON string values as \\n.`;
+  const basePrompt = buildTopicStepPlanUserPrompt({
+    field: field || 'General',
+    level: level || 'Intermediate',
+    topicTitle,
+    topicDescription: topicDescription || '',
+    priorTopics,
+    upcomingTopics,
+    moduleTitle: moduleTitle || '',
+    courseOrPathTitle: courseOrPathTitle || '',
+    numSteps: stepCount,
+  });
 
-  const prompt = `You're writing a structured lesson on "${topicTitle}" (module: "${moduleTitle}") for a ${level} learner in ${field}.
+  // Prepend the exact subtopic list when subtopics are provided so step titles match exactly
+  const userMsg = subtopicListText
+    ? `Generate steps using these EXACT subtopic titles (in order):\n${subtopicListText}\n\n${basePrompt}`
+    : basePrompt;
 
-Generate EXACTLY ${stepCount} steps — one per subtopic listed:
-${subtopicList}
+  let lastParseError = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const response = await callOpenRouter(userMsg, 2800, 0.7, TEACHER_CONTENT_PERSONA_SYSTEM);
+      const cleaned = cleanJSONResponse(response);
+      const plan = JSON.parse(cleaned);
 
-Return ONLY valid JSON. No text before or after the JSON object.
-
-{
-  "objectives": [
-    "Student will be able to explain...",
-    "Student will be able to build...",
-    "Student will understand..."
-  ],
-  "estimatedTime": "2-3 hours",
-  "steps": [
-    {
-      "stepNumber": 1,
-      "title": "EXACT subtopic title from the list",
-      "explanation": "2-3 short paragraphs in teacher voice. Open with an everyday analogy (> 💡 Intuition:) BEFORE the formal definition. Then at least one of: > 🔧 In practice: (real scenario), > ⚠️ Common mistake: (trap). Build directly from the prior step. Use \\n for line breaks.",
-      "teacherNote": "One human aside — the kind of thing a teacher says out loud in class. Start with 'I tell my students…' or 'The thing to remember here…' Warm and specific.",
-      "exampleCode": "A minimal, self-contained code snippet demonstrating this concept. Use empty string if not code-related.",
-      "exampleExplanation": "2-3 sentences walking through what the example shows and why it was written that way.",
-      "keyPoints": [
-        "First key concept or fact to remember",
-        "Second key concept or fact to remember",
-        "Third key concept or fact to remember"
-      ],
-      "commonMistake": "The one mistake students make at THIS step specifically — not the overall topic. One or two sentences, specific enough to be actionable.",
-      "action": "What the student should do right now to lock this in — write code, sketch a diagram, predict an output, or explain it to themselves out loud. Be specific about exactly what to do.",
-      "estimatedTime": "25 min",
-      "resources": [
-        {
-          "type": "youtube",
-          "title": "Specific, searchable video title — e.g. 'JavaScript Promises Explained in 10 Minutes by Fireship'",
-          "platform": "YouTube · Fireship",
-          "duration": "12 min",
-          "description": "One sentence: exactly what concept this video teaches and why it helps at this step."
-        },
-        {
-          "type": "article",
-          "title": "Specific documentation page or guide title — e.g. 'Array.prototype.map() - JavaScript | MDN'",
-          "platform": "MDN Web Docs",
-          "duration": "8 min read",
-          "description": "One sentence: what the student will specifically learn from reading this."
-        },
-        {
-          "type": "practice",
-          "title": "Specific exercise title — e.g. 'Basic JavaScript: Use the map Method to Extract Data from an Array'",
-          "platform": "freeCodeCamp",
-          "duration": "30 min",
-          "description": "One sentence: what the student will build or practice in this exercise."
-        },
-        {
-          "type": "reference",
-          "title": "Specific cheatsheet or quick-reference title — e.g. 'JavaScript Array Methods Cheatsheet'",
-          "platform": "DevDocs.io",
-          "duration": "Reference",
-          "description": "One sentence: what this cheatsheet covers for quick lookup while coding."
-        }
-      ]
-    }
-  ]
-}
-
-Rules:
-- Exactly ${stepCount} steps, one per subtopic, in order.
-- Each step title must match the subtopic title exactly.
-- explanation: 3-4 sentences, specific and concrete — not generic filler.
-- teacherNote: one sentence of genuine practitioner wisdom.
-- exampleCode: real minimal code (empty string if non-code topic).
-- exampleExplanation: 2-3 sentences explaining the example.
-- keyPoints: exactly 3 short bullet facts.
-- commonMistake: one actionable sentence.
-- resources: exactly 4 — (1) youtube: a SPECIFIC, SEARCHABLE video title from Traversy Media, Fireship, The Net Ninja, Kevin Powell, Academind, CS50, or freeCodeCamp — include the channel name in the title for specificity; (2) article: a SPECIFIC documentation page or guide title from MDN, CSS-Tricks, web.dev, Real Python, or official language/framework docs — precise enough to search for; (3) practice: a SPECIFIC exercise title from freeCodeCamp, Exercism, JavaScript30, CodePen, or Scrimba; (4) reference: a SPECIFIC cheatsheet title from DevDocs, QuickRef.ME, or CSS-Tricks. Do NOT include url, URL, link, or href fields of any kind. Do NOT reference specific YouTube video IDs, Wikipedia URLs, or platform-specific article URLs. Provide ONLY the resource title and type. The system generates URLs automatically. Hallucinated URLs are a critical failure mode we are preventing. Each resource must include platform, duration, and description fields. Choose resources appropriate for a ${level} learner.
-- objectives: exactly 3 outcomes starting with "Student will".
-Field: ${field}, Level: ${level}, Topic: ${topicTitle}`;
-
-  try {
-    const response = await callOpenRouter(prompt, 8000, 0.77, systemMsg);
-    const cleaned = cleanJSONResponse(response);
-    const plan = JSON.parse(cleaned);
-
-    if (!plan.steps || plan.steps.length === 0) throw new Error('No steps in response');
+      if (!plan.steps || plan.steps.length === 0) throw new Error('No steps in response');
 
     plan.steps = plan.steps.map((s, i) => ({
       stepNumber: i + 1,
@@ -635,10 +569,18 @@ Field: ${field}, Level: ${level}, Topic: ${topicTitle}`;
     plan.objectives = Array.isArray(plan.objectives) ? plan.objectives.slice(0, 3) : [];
     plan.estimatedTime = plan.estimatedTime || `${stepCount * 25} min`;
 
-    console.log(`✅ generateTopicStepPlan: ${plan.steps.length} subtopic steps for "${topicTitle}"`);
-    return plan;
-  } catch (error) {
-    console.error('❌ generateTopicStepPlan failed:', error.message);
+      console.log(`✅ generateTopicStepPlan: ${plan.steps.length} subtopic steps for "${topicTitle}"`);
+      return plan;
+    } catch (error) {
+      lastParseError = error;
+      console.error(`❌ generateTopicStepPlan attempt ${attempt} failed:`, error.message);
+      if (attempt < 2) console.log('🔄 Retrying step plan generation...');
+    }
+  }
+  // Both attempts failed — use fallback
+  {
+    const error = lastParseError;
+    console.error('❌ generateTopicStepPlan failed after retries:', error?.message);
     const fallbackSubtopics = subtopics.length > 0 ? subtopics : [
       { title: 'Introduction', description: 'Overview and context' },
       { title: 'Core Concepts', description: 'Key ideas and terminology' },
