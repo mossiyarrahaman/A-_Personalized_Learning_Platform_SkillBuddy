@@ -1,28 +1,26 @@
 // ============================================================================
-// EMAIL SERVICE - WITH OTP VERIFICATION
+// EMAIL SERVICE - WITH OTP VERIFICATION (USING RESEND)
 // backend/services/email-service.js
 // ============================================================================
 
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
 
 const EMAIL_CONFIG = {
-  service: process.env.EMAIL_SERVICE || 'gmail',
-  user: process.env.EMAIL_USER,
-  password: process.env.EMAIL_PASSWORD,
+  apiKey: process.env.RESEND_API_KEY,
   from: process.env.EMAIL_FROM || 'SkillBuddy <noreply@skillbuddy.com>',
   enabled: process.env.ENABLE_EMAIL_VERIFICATION === 'true',
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173'
 };
 
 // ============================================================================
-// CREATE TRANSPORTER
+// CREATE RESEND INSTANCE
 // ============================================================================
 
-let transporter = null;
+let resend = null;
 
 function initializeEmailService() {
   if (!EMAIL_CONFIG.enabled) {
@@ -30,53 +28,27 @@ function initializeEmailService() {
     return null;
   }
 
-  if (!EMAIL_CONFIG.user || !EMAIL_CONFIG.password) {
-    console.warn('⚠️ Email credentials missing in .env file');
-    console.warn('   EMAIL_USER:', EMAIL_CONFIG.user);
-    console.warn('   EMAIL_PASSWORD:', EMAIL_CONFIG.password ? 'SET (hidden)' : 'NOT SET');
+  if (!EMAIL_CONFIG.apiKey) {
+    console.warn('⚠️ Resend API Key missing in .env file (RESEND_API_KEY)');
     return null;
   }
 
   try {
-    // Remove any spaces from password
-    const cleanPassword = EMAIL_CONFIG.password.replace(/\s/g, '');
+    resend = new Resend(EMAIL_CONFIG.apiKey);
 
-    transporter = nodemailer.createTransport({
-      service: EMAIL_CONFIG.service,
-      auth: {
-        user: EMAIL_CONFIG.user,
-        pass: cleanPassword
-      },
-      debug: true,
-      logger: true
-    });
-
-    console.log('✅ Email Service Initialized');
-    console.log('   Service:', EMAIL_CONFIG.service);
-    console.log('   User:', EMAIL_CONFIG.user);
+    console.log('✅ Email Service Initialized (Resend)');
     console.log('   From:', EMAIL_CONFIG.from);
     console.log('   Enabled:', EMAIL_CONFIG.enabled);
 
-    // Verify connection
-    transporter.verify((error, success) => {
-      if (error) {
-        console.error('❌ Email verification failed:', error.message);
-        console.error('   Check your Gmail App Password settings');
-        console.error('   Visit: https://myaccount.google.com/apppasswords');
-      } else {
-        console.log('✅ Email server is ready to send messages');
-      }
-    });
-
-    return transporter;
+    return resend;
   } catch (error) {
     console.error('❌ Email Service Error:', error.message);
     return null;
   }
 }
 
-// Initialize transporter on module load
-transporter = initializeEmailService();
+// Initialize resend on module load
+resend = initializeEmailService();
 
 // Generate 6-digit OTP
 function generateOTP() {
@@ -85,7 +57,7 @@ function generateOTP() {
 
 // Send OTP Email
 async function sendOTPEmail(email, name, otp) {
-  if (!transporter) {
+  if (!resend) {
     return {
       success: false,
       message: 'Email service not configured'
@@ -93,8 +65,10 @@ async function sendOTPEmail(email, name, otp) {
   }
 
   try {
-    const mailOptions = {
-      from: process.env.EMAIL_FROM || `SkillBuddy <${process.env.EMAIL_USER}>`,
+    console.log('📧 Sending OTP email to:', email);
+
+    const { data, error } = await resend.emails.send({
+      from: EMAIL_CONFIG.from,
       to: email,
       subject: 'Verify Your SkillBuddy Account - OTP Code',
       html: `
@@ -256,7 +230,7 @@ async function sendOTPEmail(email, name, otp) {
             <div class="footer">
               <p>
                 This email was sent by <strong>SkillBuddy</strong><br>
-                Need help? <a href="mailto:${process.env.EMAIL_USER}">Contact Support</a>
+                Need help? <a href="mailto:support@skillbuddy.com">Contact Support</a>
               </p>
               <p style="margin-top: 15px; color: #999; font-size: 12px;">
                 © ${new Date().getFullYear()} SkillBuddy. All rights reserved.
@@ -266,19 +240,25 @@ async function sendOTPEmail(email, name, otp) {
         </body>
         </html>
       `
-    };
+    });
 
-    console.log('📧 Sending OTP email to:', email);
-    const info = await transporter.sendMail(mailOptions);
-    console.log('✅ OTP Email sent successfully:', info.messageId);
+    if (error) {
+      console.error('❌ Error sending OTP email (Resend):', error);
+      return {
+        success: false,
+        message: error.message
+      };
+    }
+
+    console.log('✅ OTP Email sent successfully:', data.id);
 
     return {
       success: true,
       message: 'OTP email sent successfully',
-      messageId: info.messageId
+      messageId: data.id
     };
   } catch (error) {
-    console.error('❌ Error sending OTP email:', error);
+    console.error('❌ Unexpected error sending OTP email:', error);
     return {
       success: false,
       message: error.message
@@ -288,13 +268,13 @@ async function sendOTPEmail(email, name, otp) {
 
 // Send Welcome Email (after successful verification)
 async function sendWelcomeEmail(email, name) {
-  if (!transporter) {
+  if (!resend) {
     return { success: false, message: 'Email service not configured' };
   }
 
   try {
-    const mailOptions = {
-      from: process.env.EMAIL_FROM || `SkillBuddy <${process.env.EMAIL_USER}>`,
+    const { data, error } = await resend.emails.send({
+      from: EMAIL_CONFIG.from,
       to: email,
       subject: 'Welcome to SkillBuddy! 🎉',
       html: `
@@ -334,7 +314,7 @@ async function sendWelcomeEmail(email, name) {
               </div>
               
               <div style="text-align: center;">
-                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/login" class="button">
+                <a href="${EMAIL_CONFIG.frontendUrl}/login" class="button">
                   Start Learning Now
                 </a>
               </div>
@@ -347,19 +327,23 @@ async function sendWelcomeEmail(email, name) {
         </body>
         </html>
       `
-    };
+    });
 
-    await transporter.sendMail(mailOptions);
-    return { success: true };
+    if (error) {
+      console.error('❌ Error sending welcome email (Resend):', error);
+      return { success: false, message: error.message };
+    }
+
+    return { success: true, messageId: data.id };
   } catch (error) {
-    console.error('❌ Error sending welcome email:', error);
+    console.error('❌ Unexpected error sending welcome email:', error);
     return { success: false, message: error.message };
   }
 }
 
 // Send Password Reset OTP
 async function sendPasswordResetEmail(email, name, otp) {
-  if (!transporter) {
+  if (!resend) {
     return {
       success: false,
       message: 'Email service not configured'
@@ -367,8 +351,8 @@ async function sendPasswordResetEmail(email, name, otp) {
   }
 
   try {
-    const mailOptions = {
-      from: process.env.EMAIL_FROM || `SkillBuddy <${process.env.EMAIL_USER}>`,
+    const { data, error } = await resend.emails.send({
+      from: EMAIL_CONFIG.from,
       to: email,
       subject: 'Reset Your SkillBuddy Password',
       html: `
@@ -410,12 +394,16 @@ async function sendPasswordResetEmail(email, name, otp) {
         </body>
         </html>
       `
-    };
+    });
 
-    await transporter.sendMail(mailOptions);
-    return { success: true };
+    if (error) {
+      console.error('❌ Error sending password reset email (Resend):', error);
+      return { success: false, message: error.message };
+    }
+
+    return { success: true, messageId: data.id };
   } catch (error) {
-    console.error('❌ Error sending password reset email:', error);
+    console.error('❌ Unexpected error sending password reset email:', error);
     return { success: false, message: error.message };
   }
 }
