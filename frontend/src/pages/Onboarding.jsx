@@ -106,7 +106,7 @@ const Onboarding = () => {
             const res = await api.post('/courses/onboarding-assessment', {
                 field: fieldTitle,
                 level: levelTitle
-            });
+            }, { timeout: 90000 });
 
             if (res.data.questions && res.data.questions.length > 0) {
                 setQuizQuestions(res.data.questions);
