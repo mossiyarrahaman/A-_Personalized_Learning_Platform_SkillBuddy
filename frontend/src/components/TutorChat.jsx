@@ -63,7 +63,7 @@ const TutorChat = ({ isOpen, onClose, sessionId, newSessionContext }) => {
                             openingMessage: newSessionContext.openingMessage,
                         });
                         setSession(res.data.session);
-                        setMessages([...res.data.session.messages, res.data.assistantMessage]);
+                        setMessages(res.data.session.messages);
                     } catch (err) {
                         if (err.response?.status === 409) {
                             const existingId = err.response.data.existingSessionId;

@@ -8,7 +8,7 @@ const TutorPromptInput = ({ topicTitle, topicId, moduleId, courseId, pathId, onO
     const [value, setValue] = useState('');
     const [focused, setFocused] = useState(false);
 
-    const canOpen = value.replace(/\s/g, '').length >= 8;
+    const canOpen = value.trim().length > 0;
 
     const handleSubmit = () => {
         if (!canOpen) return;

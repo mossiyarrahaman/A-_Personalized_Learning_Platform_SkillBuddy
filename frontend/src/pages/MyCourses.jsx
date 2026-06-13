@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { GraduationCap, ArrowRight, Loader, Brain, Users, BookOpen, Plus } from 'lucide-react';
+import { GraduationCap, ArrowRight, Loader, Brain, Users, BookOpen, Plus, Trash2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import api from '../api/axios';
 import { useAppTheme } from '../hooks/useAppTheme';
@@ -16,6 +16,7 @@ const MyCourses = () => {
     const [enrolledClasses, setEnrolledClasses] = useState([]);
     const [availableCourses, setAvailableCourses] = useState([]);
     const [enrollingId, setEnrollingId] = useState(null);
+    const [deletingPathId, setDeletingPathId] = useState(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => { fetchData(); }, []);
@@ -47,6 +48,24 @@ const MyCourses = () => {
             console.error('Enroll failed:', error);
         } finally {
             setEnrollingId(null);
+        }
+    };
+
+    const handleDeletePath = async (pathId, e) => {
+        e.stopPropagation();
+        if (!window.confirm('Delete this learning path? This can\'t be undone.')) return;
+        setDeletingPathId(pathId);
+        try {
+            await api.delete(`/courses/paths/${pathId}`);
+            setAiProfile(prev => ({
+                ...prev,
+                paths: (prev.paths || []).filter(p => p._id !== pathId),
+            }));
+        } catch (error) {
+            console.error('Delete path failed:', error);
+            alert('Failed to delete the path. Please try again.');
+        } finally {
+            setDeletingPathId(null);
         }
     };
 
@@ -175,8 +194,22 @@ const MyCourses = () => {
                                                 onClick={() => navigate(`/ai-path/${path._id}`)}
                                             >
                                                 <div style={{ height: '148px', background: `linear-gradient(135deg,${accent.from}70,${accent.to}55)`, position: 'relative', padding: '20px', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-                                                    <div style={{ position: 'absolute', top: '14px', right: '14px', background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(6px)', padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700, border: '1px solid rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', gap: '4px', color: '#fff' }}>
-                                                        <Brain size={11} /> AI Generated
+                                                    <div style={{ position: 'absolute', top: '14px', right: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                        <div style={{ background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(6px)', padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700, border: '1px solid rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', gap: '4px', color: '#fff' }}>
+                                                            <Brain size={11} /> AI Generated
+                                                        </div>
+                                                        <button
+                                                            onClick={(e) => handleDeletePath(path._id, e)}
+                                                            disabled={deletingPathId === path._id}
+                                                            title="Delete this learning path"
+                                                            style={{ background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(6px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '50%', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: deletingPathId === path._id ? 'not-allowed' : 'pointer', color: 'rgba(255,255,255,0.7)', transition: 'all .15s', opacity: deletingPathId === path._id ? 0.5 : 1 }}
+                                                            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.7)'; e.currentTarget.style.color = '#fff'; }}
+                                                            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(0,0,0,0.35)'; e.currentTarget.style.color = 'rgba(255,255,255,0.7)'; }}
+                                                        >
+                                                            {deletingPathId === path._id
+                                                                ? <Loader size={12} className="animate-spin" />
+                                                                : <Trash2 size={12} />}
+                                                        </button>
                                                     </div>
                                                     <h3 style={{ fontSize: '22px', fontWeight: 800, color: '#fff', margin: 0, lineHeight: 1.2 }}>{path.onboarding?.field}</h3>
                                                     <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.75)', margin: '4px 0 0', fontWeight: 500 }}>{path.onboarding?.level} Level</p>

@@ -169,10 +169,10 @@ const Onboarding = () => {
             };
 
             if (isAddMode) {
-                await api.post('/courses/paths', payload);
+                await api.post('/courses/paths', payload, { timeout: 90000 });
                 navigate('/my-courses');
             } else {
-                await api.post('/courses/generate-path', payload);
+                await api.post('/courses/generate-path', payload, { timeout: 90000 });
                 navigate('/dashboard');
             }
         } catch (error) {

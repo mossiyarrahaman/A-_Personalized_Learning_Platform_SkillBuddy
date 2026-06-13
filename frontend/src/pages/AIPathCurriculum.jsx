@@ -4,6 +4,7 @@ import { ChevronLeft, Loader, Brain } from 'lucide-react'; // Brain kept for emp
 import api from '../api/axios';
 import RoadmapTree from '../components/RoadmapTree';
 import TopicDetailModal from '../components/TopicDetailModal';
+import TutorChat from '../components/TutorChat';
 import { useAppTheme } from '../hooks/useAppTheme';
 
 const AIPathCurriculum = () => {
@@ -15,6 +16,7 @@ const AIPathCurriculum = () => {
     const [aiProfile, setAiProfile] = useState(null);
     const [loading, setLoading] = useState(true);
     const [selectedTopic, setSelectedTopic] = useState(null);
+    const [tutorCtx, setTutorCtx] = useState(null);
 
     useEffect(() => { fetchData(); }, [pathId]);
 
@@ -92,8 +94,16 @@ const AIPathCurriculum = () => {
                     pathId={pathId}
                     onClose={() => setSelectedTopic(null)}
                     onUpdate={fetchData}
+                    onOpenTutor={(ctx) => { setSelectedTopic(null); setTutorCtx(ctx); }}
                 />
             )}
+
+            <TutorChat
+                isOpen={!!tutorCtx}
+                onClose={() => setTutorCtx(null)}
+                newSessionContext={tutorCtx}
+                sessionId={null}
+            />
 
             {/* Back button — pinned to top-left */}
             <div style={{ padding: '24px 24px 0' }}>
@@ -113,6 +123,7 @@ const AIPathCurriculum = () => {
                 courseName={aiProfile.onboarding?.field || ''}
                 onTopicClick={(moduleId, topicId) => setSelectedTopic({ moduleId, topicId })}
                 onTopicToggle={handleTopicToggle}
+                onOpenTutor={(ctx) => setTutorCtx(ctx)}
             />
         </div>
     );
